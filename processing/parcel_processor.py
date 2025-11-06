@@ -4,7 +4,7 @@ import dotenv
 import os
 import fiona
 from sqlalchemy import create_engine
-from utils import create_reprojected_geometry_col
+from db_actions.db_utils import create_reprojected_geometry_col
 dotenv.load_dotenv()
 
 user, password, host, port, db_name = os.environ["DB_USER"], os.environ["DB_PASSWORD"], "localhost", "5432", os.environ["DB_NAME"]

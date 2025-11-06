@@ -15,7 +15,7 @@ PARCELS = os.getenv("RECREATE_PARCELS", "false").lower() == "true"
 
 # --- (Re)create DB ---
 if GEOGRAPHIC_FEATURES and INFRASTRUCTURE_FEATURES and PARCELS:
-    print("** Recreating Database **å")
+    print("** Recreating Database **")
     conn = psycopg2.connect(dbname="postgres", user=user, password=password, host=host, port=port)
     conn.autocommit = True
     cur = conn.cursor()

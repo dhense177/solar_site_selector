@@ -1,8 +1,10 @@
 #!/bin/bash
 
-# Usage: ./recreate_geographic_features.sh [--geo-only|--infra-only|--parcels-only]
-# --geo-only: Recreate only geographic_features tables (preserves parcels) [default]
-# --all: Recreate all tables
+# Usage: ./repopulate_database.sh [--geo-only|--infra-only|--parcels-only]
+# --geo-only: Recreate only geographic_features tables (preserves parcels)
+# --infra-only: Recreate only infrastructure_features tables (preserves parcels)
+# --parcels-only: Recreate only parcels tables (preserves geographic_features and infrastructure_features)
+# If no argument is provided, all tables will be recreated.
 
 if [ "$1" == "--geo-only" ]; then
     export RECREATE_GEO_FEATURES=true
