@@ -1,46 +1,50 @@
-
-from langchain_core.prompts import ChatPromptTemplate
+from typing import Annotated, Optional, List, Dict, Any, TypedDict
+from langchain.chat_models import ChatOpenAI
+from langchain.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langgraph.graph import StateGraph, END
+from langgraph.graph.message import add_messages
 from langgraph.checkpoint.memory import MemorySaver
-from langchain_core.runnables import RunnablePassthrough
-import dotenv
+from sqlalchemy import create_engine, text, inspect
+from prompts.text_to_sql_prompts import write_sql_template
 import os
+import dotenv
 import re
-import time
-from collections import Counter
-from sqlalchemy import create_engine, inspect, text
-from typing import TypedDict, Optional
-from langchain_openai import ChatOpenAI
+from db_actions.db_utils import run_query
 dotenv.load_dotenv()
 
+# --- CONFIG ---
 user, password, host, port, db_name = os.environ["DB_USER"], os.environ["DB_PASSWORD"], "localhost", "5432", os.environ["DB_NAME"]
 engine = create_engine(f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{db_name}")
 
-llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.2)
+llm = ChatOpenAI(model="gpt-4.1", temperature=0.2)
 
-MAX_ATTEMPTS = 3
-
-# Define the shared state for the graph
+# --- STATE ---
 class SQLState(TypedDict):
-    question: str
-    schema: str
-    sql: Optional[str]
-    previous_sql: Optional[str]  # For tracking previous query when refining
+    """Shared memory and conversation state for multi-turn Text-to-SQL."""
+
+    # Latest user input
+    user_query: str
+    expanded_query: Optional[str]
+    sql_query: Optional[str]
+
+    # Results
+    results: Optional[Any]
+
+    # Error tracking
     error: Optional[str]
-    result: Optional[list]
-    attempt: int
-    validated_empty_ok: Optional[bool]  # Flag to indicate if empty results are validated as correct
-    parcel_count: Optional[int]  # Total number of parcels in the database
+    last_failed_sql: Optional[str]
+    attempt: int  # Track number of repair attempts
 
-def get_schema(table_name, schema_name):
-    return inspect(engine).get_columns('parcel_details', schema='parcels')
+    # Persistent multi-turn memory
+    conversation: Annotated[List[Dict[str, str]], add_messages]
 
+# --- FUNCTIONS ---
 def get_all_tables_schema(_):
     """Get schema information for all tables in all schemas"""
     inspector = inspect(engine)
     # schemas = inspector.get_schema_names()
-    schemas = ['parcels','geographic_features']
+    schemas = ['parcels', 'geographic_features', 'infrastructure_features']
     
     all_tables_info = []
     
@@ -60,545 +64,290 @@ def get_all_tables_schema(_):
     
     return "\n\n".join(all_tables_info)
 
+SCHEMA_TEXT = get_all_tables_schema("")
 
-def run_query(sql: str, con):
-    try:
-        print(f'Query being run: {sql} \n\n')
-        return con.execute(text(sql)).mappings().all(), None
-    except Exception as e:
-        print("Error running query: ", str(e))
-        return None, str(e)
+# --- HELPER FUNCTIONS ---
+def clean_sql(sql: str) -> str:
+    """Remove markdown code blocks and extract SQL from LLM response."""
+    if not sql:
+        return ""
+    
+    # Remove markdown code blocks
+    sql = re.sub(r'```sql\n?', '', sql)
+    sql = re.sub(r'```\n?', '', sql)
+    sql = sql.strip()
+    
+    # Extract SQL if prefixed with "SQL:"
+    if "SQL:" in sql or "sql:" in sql:
+        parts = re.split(r'(?i)SQL:\s*', sql, maxsplit=1)
+        if len(parts) > 1:
+            sql = parts[1]
+            # Remove explanation if present
+            if "Explanation:" in sql or "explanation:" in sql:
+                sql = re.split(r'(?i)Explanation:\s*', sql, maxsplit=1)[0]
+    
+    return sql.strip()
 
-def extract_conditional_filters(question: str):
-    template = f"""
-        You are a language-to-logic parser that extracts conditional filters from natural language site-selection queries.
 
-        Your task is to read the user query and list each *distinct condition* exactly as it appears or is implied in the text.
+# def ensure_geometry_as_geojson(sql: str) -> str:
+#     """Convert raw geometry to GeoJSON format."""
+#     if not sql or 'ST_AsGeoJSON' in sql:
+#         return sql
+    
+#     # Find table alias (default to pd)
+#     alias_match = re.search(r'FROM\s+parcels\.parcel_details\s+(?:AS\s+)?(\w+)', sql, re.IGNORECASE)
+#     alias = alias_match.group(1) if alias_match else 'pd'
+#     geometry_col = f"{alias}.geometry"
+    
+#     # Replace raw geometry with GeoJSON
+#     sql = re.sub(
+#         rf'\b{re.escape(geometry_col)}\b',
+#         f'ST_AsGeoJSON({geometry_col})::json as geometry',
+#         sql,
+#         flags=re.IGNORECASE
+#     )
+    
+#     return sql
 
-        Each condition should represent one logical filter (for example, parcel size, location, zoning, exclusions, or proximity).
+# --- NODES ---
 
-        ---
+def contextual_query_understanding(state: SQLState):
+    """Rewrite user's query in context using conversation memory."""
+    conversation = state.get("conversation", [])
+    user_query = state.get("user_query", "")
+    
+    prompt = f"""
+    You are a helpful assistant that interprets user questions about a parcel database.
+    Use the prior conversation to make the current query self-contained.
 
-        ### Output format
+    Conversation so far:
+    {conversation}
 
-        Return a JSON object with a single key `"conditions"`, whose value is a list of short, literal condition strings.
+    Latest query:
+    {user_query}
 
-        Do **not** rewrite or interpret them as database fields.  
-        Do **not** add metadata, operators, or inferred structure.  
-        Just capture the constraints in plain text, as faithfully as possible.
+    Rewrite the latest query so it can be executed independently.
+    Return only the rewritten text.
+    """
+    rewritten = llm.invoke(prompt).content.strip()
+    return {
+        "expanded_query": rewritten,
+        "conversation": [
+            {"role": "user", "content": user_query},
+            {"role": "assistant", "content": rewritten},
+        ],
+    }
 
-        ---
 
-        ### Example
-
-        **User query:**
-        "Find parcels larger than 10 acres in Worcester County, within 5 km of a substation, and not on wetlands."
-
-        **Output:**
-        
-        "conditions": [
-            "larger than 10 acres",
-            "in Worcester County",
-            "within 5 km of a substation",
-            "not on wetlands"
-        ]
-        
-
-        SQL Query:"""
-
+def generate_sql(state: SQLState):
+    """Generate SQL from the natural language query."""
+    expanded_query = state.get("expanded_query", "")
+    
     prompt = ChatPromptTemplate.from_messages(
         [
-            ("system", "You are a language-to-logic parser that extracts conditional filters from natural language site-selection queries."),
-            ("human", template),
+            # "**CRITICAL**: ALWAYS include the 'ST_AsGeoJSON(geometry)::json as geometry' field from parcel_details database table in your SELECT clause."
+            ("system", "You are a SQL expert with specialized knowledge in mapping natural language queries to database schema values."
+            
+            "Provide both the SQL query and a clear explanation of your reasoning."),
+            ("human", write_sql_template),
         ]
     )
     chain = prompt | llm | StrOutputParser()
-    response = chain.invoke({"question": question})
-    return response
-
-def write_sql_query(state: SQLState):
-    # Check if we're refining a previous query
-    if state.get("previous_sql"):
-        template = """Based on the available tables and their schemas below, MODIFY the previous SQL query according to the new requirement.
-
-        Available tables and schemas:
-        {tables}
-
-        Previous SQL query:
-        {previous_sql}
-
-        New requirement: {question}
-
-        Instructions:
-        - Take the previous SQL query and modify it to incorporate the new requirement
-        - Preserve the existing structure and logic, only add/modify what's needed for the new requirement
-        - Use the full table name format: schema.table_name
-        - You may need to add JOINs or WHERE clauses to satisfy the new requirement
-        - Return ONLY the modified SQL query, no explanations or markdown formatting
-
-        Modified SQL Query:"""
-        
-        prompt = ChatPromptTemplate.from_messages(
-            [
-                ("system", "You are a SQL expert. Modify the existing SQL query to incorporate the new requirement. "
-                "Preserve the existing query structure and logic, only adding or modifying what's necessary. "
-                "Return ONLY the modified SQL query - no prefix or suffix quotes, no markdown code blocks, no explanations, just the raw SQL query."),
-                ("human", template),
-            ]
-        )
-        tables = get_all_tables_schema("")
-        chain = prompt | llm | StrOutputParser()
-        response = chain.invoke({
-            "tables": tables, 
-            "question": state["question"],
-            "previous_sql": state["previous_sql"]
-        })
-    else:
-        template = """Based on the available tables and their schemas below, write a SQL query that would answer the user's question.
-
-        Available tables and schemas:
-        {tables}
-
-        Question: {question}
-
-        Instructions:
-        - Choose the appropriate table(s) to query based on the question
-        - Use the full table name format: schema.table_name
-        - You may need to JOIN multiple tables if the question requires it
-        - When performing distance or area calculations, **ALWAYS** use the geometry_26986 column. Do not use the geometry column.
-        - Return ONLY the SQL query, no explanations or markdown formatting
-
-        SQL Query:"""
-
-        prompt = ChatPromptTemplate.from_messages(
-            [
-                ("system", "You are a SQL expert. Given a question and available database tables, write a valid SQL query using PostgreSQL/PostGIS syntax. "
-                "Choose the appropriate table(s) automatically based on what the question is asking. "
-                "No pre-amble. Return ONLY the SQL query - no prefix or suffix quotes, no markdown code blocks, no explanations, just the raw SQL query."),
-                ("human", template),
-            ]
-        )
-        tables = get_all_tables_schema("")
-        chain = prompt | llm | StrOutputParser()
-        response = chain.invoke({"tables": tables, "question": state["question"]})
+    response = chain.invoke({"tables": SCHEMA_TEXT, "user_query": expanded_query})
     
-    print(response)
-    return {"sql": response, "attempt": state["attempt"] + 1}
-    # return (
-    #     RunnablePassthrough.assign(tables=get_all_tables_schema)
-    #     | prompt
-    #     | llm
-    #     | StrOutputParser()
-    # )
+    sql = clean_sql(response)
+    # sql = ensure_geometry_as_geojson(sql)
+    return {"sql_query": sql}
 
+
+# def execute_sql(state: SQLState):
+#     """Run SQL and capture success or failure."""
+#     sql_query = state.get("sql_query", "")
+#     try:
+#         with engine.connect() as conn:
+#             result = conn.execute(text(sql_query))
+#             rows = result.fetchall()
+#         return {"results": [dict(r._mapping) for r in rows], "error": None}
+#     except Exception as e:
+#         return {"error": str(e), "last_failed_sql": sql_query}
 def execute_sql(state: SQLState):
     con = engine.connect()
-    rows, error = run_query(state["sql"], con)
+    rows, error = run_query(state["sql_query"], con)
     con.close()
-    return {"result": rows, "error": error}
+    
+    # Convert RowMapping objects to plain dictionaries for serialization
+    # This is necessary because the checkpointer needs to serialize the state
+    # RowMapping objects from SQLAlchemy are not JSON/msgpack serializable
+    if rows:
+        serializable_rows = [dict(row) for row in rows]
+        rows = serializable_rows
+    
+    return {"results": rows, "error": error}
+
+def validate_sql(state: SQLState):
+    """
+    Validate SQL before accepting results:
+    - Check syntax via EXPLAIN
+    - Check non-empty results
+    - Use LLM to confirm the results make sense
+    """
+    sql_query = state.get("sql_query", "")
+    results = state.get("results")
+
+    # 1️⃣ Check SQL syntax using EXPLAIN
+    # try:
+    #     with engine.connect() as conn:
+    #         conn.execute(text(f"EXPLAIN {sql_query}"))
+    # except Exception as e:
+    #     return {"error": f"SQL syntax error: {e}", "last_failed_sql": sql_query}
+
+    # 2️⃣ Check for empty results
+    if not results or len(results) == 0:
+        return {
+            "error": "Query executed successfully but returned 0 results.",
+            "last_failed_sql": sql_query,
+        }
+
+    # # 3️⃣ Validate alignment with user intent
+    # # Use the first few rows to check correctness
+    # preview = state.results[:3]
+    # validation_prompt = f"""
+    # The following SQL query was used to answer the user's request:
+
+    # User request:
+    # {state.user_query}
+
+    # SQL:
+    # {state.sql_query}
+
+    # First few results:
+    # {preview}
+
+    # Determine whether the results seem relevant to the user's intent.
+    # Reply with "VALID" if they match, or "INVALID" if they do not.
+    # """
+
+    # verdict = llm.invoke(validation_prompt).content.strip().upper()
+    # if "INVALID" in verdict:
+    #     return {"error": "Results appear misaligned with user intent.", "last_failed_sql": state.sql_query}
+
+    # ✅ All good
+    return {"error": None}
 
 
 def repair_sql(state: SQLState):
-    # Get fresh schema information
-    schema = get_all_tables_schema("")
+    """If SQL failed or failed validation, ask the LLM to fix it."""
+    error = state.get("error")
+    if not error:
+        return state
+
+    last_failed_sql = state.get("last_failed_sql", "")
+    attempt = state.get("attempt", 0)
     
-    # Check if this is a duplicate issue or an error
-    has_duplicates = False
-    duplicate_info = ""
-    if not state.get("error") and state.get("result"):
-        results = state.get("result", [])
-        if results and len(results) > 1:
-            parcel_ids = [row.get('parcel_id') for row in results if row.get('parcel_id')]
-            unique_count = len(set(parcel_ids)) if parcel_ids else 0
-            if parcel_ids and len(parcel_ids) != unique_count:
-                has_duplicates = True
-                counts = Counter(parcel_ids)
-                duplicate_ids = [pid for pid, count in counts.items() if count > 1]
-                duplicate_info = f"The query returned {len(parcel_ids)} rows with only {unique_count} unique parcels. Found {len(duplicate_ids)} duplicate parcel_id(s)."
+    prompt = f"""
+    The following SQL query failed validation.
+
+    SQL:
+    {last_failed_sql}
+
+    Error or problem:
+    {error}
+
+    Please correct the SQL and return only the fixed statement.
+    """
+    response = llm.invoke(prompt).content.strip()
+    fixed = clean_sql(response)
+    # fixed = ensure_geometry_as_geojson(fixed)
     
-    if has_duplicates:
-        template = """You are fixing a SQL query that returned duplicate parcel results. This usually means the query is missing DISTINCT or has incorrect JOINs causing duplicates.
+    return {"sql_query": fixed, "error": None, "attempt": attempt + 1}
 
-Available tables and schemas:
-{tables}
 
-Original question: {question}
-
-THE PROBLEM:
-{duplicate_info}
-
-THE SQL QUERY (this is what needs to be fixed):
-{sql}
-
-Instructions:
-1. The query returns duplicate parcel_id values - this is always wrong
-2. Add DISTINCT or DISTINCT ON (parcel_id) to eliminate duplicates
-3. Check JOINs - they may be causing multiple matches per parcel
-4. Make minimal changes - preserve the query logic but eliminate duplicates
-5. Return the corrected SQL query only - no explanations, no markdown
-
-CORRECTED SQL:"""
-        
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", "You are a SQL repair assistant. Queries that return duplicate parcel_ids are incorrect. Fix by adding DISTINCT or correcting JOINs. Return only the SQL query."),
-            ("human", template),
-        ])
-        
-        chain = prompt | llm | StrOutputParser()
-        response = chain.invoke({
-            "tables": schema,
-            "question": state["question"],
-            "duplicate_info": duplicate_info,
-            "sql": state["sql"]
-        })
+def display_results(state: SQLState):
+    """Final display node."""
+    error = state.get("error")
+    results = state.get("results")
+    
+    if error:
+        print("❌ Query failed:", error)
+    elif results:
+        print(f"✅ Returned {len(results)} results")
     else:
-        template = """You are fixing a SQL query that failed. The error message tells you exactly what's wrong. Read it carefully and fix ONLY what the error says is wrong.
-
-Available tables and schemas:
-{tables}
-
-Original question: {question}
-
-THE ERROR MESSAGE (this tells you what's broken):
-{error}
-
-THE FAILED SQL (this is what needs to be fixed):
-{sql}
-
-Instructions:
-1. Read the error message - it tells you what function, column, or syntax doesn't exist
-2. Remove or replace EXACTLY what the error says is wrong
-3. Do NOT use the same problematic function again - if ST_Width doesn't exist, don't use ST_Width
-4. Make minimal changes - only fix what the error points out
-5. Return the corrected SQL query only - no explanations, no markdown
-
-CORRECTED SQL:"""
-        
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", "You are a SQL repair assistant. When an error message says something doesn't exist, you MUST remove it. Do NOT repeat the same mistake. Return only the SQL query."),
-            ("human", template),
-        ])
-        
-        chain = prompt | llm | StrOutputParser()
-        response = chain.invoke({
-            "tables": schema,
-            "question": state["question"],
-            "error": state["error"],
-            "sql": state["sql"]
-        })
-    
-    print(f"🔧 Repair attempt {state['attempt'] + 1}: {response}")
-    return {"sql": response, "attempt": state["attempt"] + 1}
+        print("No results found.")
+    return state
 
 
-def validate_results(state: SQLState):
-    """Validate if a query returning suspicious results (0 or too many) is correct, or generate a fixed query"""
-    # Get fresh schema information
-    schema = get_all_tables_schema("")
-    
-    result_count = len(state.get("result", []))
-    parcel_count = state.get("parcel_count")
-    
-    # Determine the issue (duplicates should never reach here - they go to repair_sql)
-    if result_count == 0:
-        issue_description = "returned 0 results"
-        issue_type = "zero"
-    elif parcel_count and result_count > parcel_count:
-        issue_description = f"returned {result_count} results, which is more than the total number of parcels in the database ({parcel_count}). This suggests the query may be incorrect (e.g., missing DISTINCT, incorrect JOINs causing duplicates)."
-        issue_type = "too_many"
-    else:
-        # This shouldn't happen if routing is correct, but handle it gracefully
-        return {"validated_empty_ok": True, "attempt": state["attempt"] + 1}
-    
-    template = """A SQL query executed successfully but {issue_description}. You need to determine if:
-1. The query is syntactically correct
-2. The query is the RIGHT query to answer the user's question
+# --- GRAPH CONSTRUCTION ---
+graph = StateGraph(SQLState)
 
-Available tables and schemas:
-{tables}
+graph.add_node("contextual_query_understanding", contextual_query_understanding)
+graph.add_node("generate_sql", generate_sql)
+graph.add_node("execute_sql", execute_sql)
+graph.add_node("validate_sql", validate_sql)
+graph.add_node("repair_sql", repair_sql)
+graph.add_node("display_results", display_results)
 
-Original question: {question}
+graph.set_entry_point("contextual_query_understanding")
 
-The SQL query that {issue_description}:
-{sql}
+graph.add_edge("contextual_query_understanding", "generate_sql")
+graph.add_edge("generate_sql", "execute_sql")
+graph.add_edge("execute_sql", "validate_sql")
 
-{further_context}
-
-Instructions:
-1. Check if the query syntax is correct
-2. Check if the query logic correctly answers the user's question
-3. If BOTH are correct, respond with "VALID: The query is correct and {issue_type} results is expected"
-4. If either is wrong, respond with "FIX: " followed by the corrected SQL query
-
-Your response (either "VALID: [explanation]" or "FIX: [corrected SQL]"):"""
-    
-    further_context = ""
-    if issue_type == "too_many":
-        further_context = f"Note: The total number of parcels in the database is {parcel_count}. If the query returns more rows than this, it likely has duplicate results from incorrect JOINs or missing DISTINCT clauses."
-    
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", "You are a SQL validation assistant. Analyze if a query with suspicious results is correct. "
-        "If the query is syntactically correct AND correctly answers the question, respond with 'VALID: [explanation]'. "
-        "If there's an issue, respond with 'FIX: ' followed by the corrected SQL query only."),
-        ("human", template),
-    ])
-    
-    chain = prompt | llm | StrOutputParser()
-    response = chain.invoke({
-        "tables": schema,
-        "question": state["question"],
-        "sql": state["sql"],
-        "issue_description": issue_description,
-        "issue_type": issue_type,
-        "further_context": further_context,
-        "parcel_count": parcel_count if parcel_count else "unknown"
-    })
-    
-    print(f"🔍 Validation ({issue_description}): {response}")
-    
-    # Parse the response
-    if response.strip().startswith("VALID:"):
-        # Query is valid, results are acceptable
-        print(f"✅ Query validated as correct - {issue_description} are acceptable")
-        return {"validated_empty_ok": True, "attempt": state["attempt"] + 1}
-    elif response.strip().startswith("FIX:"):
-        # Query needs fixing, extract the new SQL
-        new_sql = response.strip().replace("FIX:", "").strip()
-        # Remove any markdown code blocks if present
-        new_sql = re.sub(r'```sql\n?', '', new_sql)
-        new_sql = re.sub(r'```\n?', '', new_sql)
-        new_sql = new_sql.strip()
-        print(f"🔧 Fixed query: {new_sql}")
-        return {"sql": new_sql, "validated_empty_ok": False, "attempt": state["attempt"] + 1}
-    else:
-        # Unexpected response format, try to extract SQL or treat as valid
-        print("⚠️  Unexpected validation response format, attempting to extract SQL...")
-        if "SELECT" in response.upper() or "FROM" in response.upper():
-            # Looks like SQL, use it
-            new_sql = response.strip()
-            new_sql = re.sub(r'```sql\n?', '', new_sql)
-            new_sql = re.sub(r'```\n?', '', new_sql)
-            new_sql = new_sql.strip()
-            return {"sql": new_sql, "validated_empty_ok": False, "attempt": state["attempt"] + 1}
-        else:
-            # Assume it's valid if we can't parse it
-            return {"validated_empty_ok": True, "attempt": state["attempt"] + 1}
-
- # --- Build the LangGraph workflow ---
-workflow = StateGraph(SQLState)
-
-workflow.add_node("generate_sql", write_sql_query)
-workflow.add_node("execute_sql", execute_sql)
-workflow.add_node("repair_sql", repair_sql)
-workflow.add_node("validate_results", validate_results)
-
-# Logic: generate → execute → (repair if error, or validate if empty, or end)
-workflow.add_edge("generate_sql", "execute_sql")
-
-def route_after_execute(state: SQLState):
-    """Route after executing SQL: check for errors first, then duplicates, then suspicious results"""
-    # If there's an error and we haven't exceeded attempts, repair
-    if state.get("error") and state["attempt"] < MAX_ATTEMPTS:
-        return "repair_sql"
-    # If no error, check for duplicates - these should go to repair_sql
-    elif (not state.get("error") and 
-          state.get("result") is not None):
-        results = state.get("result", [])
-        result_count = len(results)
-        
-        # Check for duplicates - treat as error and send to repair
-        has_duplicates = False
-        if results and result_count > 1:
-            parcel_ids = [row.get('parcel_id') for row in results if row.get('parcel_id')]
-            has_duplicates = len(parcel_ids) != len(set(parcel_ids)) if parcel_ids else False
-        
-        if has_duplicates and state["attempt"] < MAX_ATTEMPTS:
-            return "repair_sql"
-        
-        # If no duplicates, check for other suspicious results (0 results or too many)
-        parcel_count = state.get("parcel_count")
-        needs_validation = (
-            result_count == 0 or 
-            (parcel_count and result_count > parcel_count)
-        )
-        if (needs_validation and 
-            not state.get("validated_empty_ok") and 
-            state["attempt"] < MAX_ATTEMPTS):
-            return "validate_results"
-    # Otherwise, end
-    return END
-
-workflow.add_conditional_edges(
-    "execute_sql",
-    route_after_execute,
-    {
-        "repair_sql": "repair_sql",
-        "validate_results": "validate_results",
-        END: END
-    },
-)
-
-workflow.add_edge("repair_sql", "execute_sql")
+# Conditional routing: if validation fails → repair_sql (with attempt limit)
+MAX_REPAIR_ATTEMPTS = 3
 
 def route_after_validate(state: SQLState):
-    """Route after validating empty results"""
-    # If validation says it's OK, end
-    if state.get("validated_empty_ok"):
-        return END
-    # Otherwise, we have a new SQL query to execute
+    """Route after validation: repair if error and under attempt limit, otherwise display results"""
+    error = state.get("error")
+    attempt = state.get("attempt", 0)
+    
+    if error and attempt < MAX_REPAIR_ATTEMPTS:
+        return "repair_sql"
     else:
-        return "execute_sql"
+        return "display_results"
 
-workflow.add_conditional_edges(
-    "validate_results",
+graph.add_conditional_edges(
+    "validate_sql",
     route_after_validate,
     {
-        "execute_sql": "execute_sql",
-        END: END
-    },
+        "repair_sql": "repair_sql",
+        "display_results": "display_results"
+    }
 )
 
-# Set entrypoint
-workflow.set_entry_point("generate_sql")
+graph.add_edge("repair_sql", "execute_sql")
+graph.add_edge("display_results", END)
 
-# Memory checkpoint (optional)
-# memory = MemorySaver()
+# Compile with MemorySaver for checkpointing (required for api_server.py)
+memory = MemorySaver()
+app = graph.compile(checkpointer=memory)
 
-# Compile the app
-# app = workflow.compile(checkpointer=memory)
-app = workflow.compile()
 
 if __name__ == "__main__":
-    schema_text = get_all_tables_schema("")
-
-    # Get total parcel count for validation
-    query = "SELECT COUNT(*) as count FROM parcels.parcel_details"
-    con = engine.connect()
-    parcel_count_result, error = run_query(query, con)
-    con.close()
+    from langchain_core.runnables import RunnableConfig
     
-    parcel_count = None
-    if parcel_count_result and not error and len(parcel_count_result) > 0:
-        # Extract count from result (result is a list of mappings)
-        parcel_count = int(parcel_count_result[0].get('count', 0))
-        print(f"Total parcels in database: {parcel_count}")
-    
-    # question = "Find me all sites in Milton, Massachusetts that are more than 20 acres."
-    # sql_query = write_sql_query(llm).invoke({"question": question})
-    # print(sql_query)
-    # result, error = run_query(sql_query)
-    # print(len(result))
-
-
-    initial_state = {
-        "question":"Exclude parcels within 250 feet of residential structures and within 500 feet of schools or hospitals.",
-        "schema": schema_text,
-        "sql": None,
-        "previous_sql": None,
+    state = {
+        "user_query": "Find me all sites in Franklin county that are more than 20 acres.",
+        "expanded_query": None,
+        "sql_query": None,
+        "results": None,
         "error": None,
-        "result": None,
+        "last_failed_sql": None,
         "attempt": 0,
-        "validated_empty_ok": False,
-        "parcel_count": parcel_count,
+        "conversation": []
     }
-    start_time = time.time()
-    final_state = app.invoke(initial_state)
-    end_time = time.time()
-    print(f"Time taken: {end_time - start_time} seconds")
-    print(f"Number of rows: {len(final_state['result'])}")
-    print(f"Number of unique parcels: {len(set([row['parcel_id'] for row in final_state['result']]))}")
+    config = RunnableConfig(configurable={"thread_id": "test-thread"})
+    result = app.invoke(state, config=config)
+    # print(result)
 
-    # question = "Find me all sites in Milton, Massachusetts that are more than 20 acres and at least 2km from any wetlands."
-    # sql_query = write_sql_query(llm).invoke({"question": question})
-    # print(sql_query)
-    # result, error = run_query(sql_query)
-    # print(len(result))
-
-
-    # # Can we get the power lines as well and return them so they can be displayed on the map?
-    # question = "Find me all sites in Milton, Massachusetts that are more than 20 acres and within 2km of any power line or substation."
-    # sql_query = write_sql_query(llm).invoke({"question": question})
-    # print(sql_query)
-    # result, error = run_query(sql_query)
-    # print(len(result))
-
-    # Need to alter the projection for this calculation?
-    # Need a loop
-    # question = "Find me suitable parcels that are in Western Massachusetts and only include parcels that are at least 500 feet wide in both dimensions so I can fit rows"
-    # sql_query = write_sql_query(llm).invoke({"question": question})
-    # print(sql_query)
-    # result, error = run_query(sql_query)
-    # print(len(result))
-
-
-    # --- Run the Graph ---
-    # Example 1: Initial query
-    # initial_state = {
-    #     "question": "Find parcels within 1 km of a transmission line above 138 kV and within 2 km of a substation.",
-    #     "schema": schema_text,
-    #     "sql": None,
-    #     "previous_sql": None,
-    #     "error": None,
-    #     "result": None,
+    # state = {
+    #     "user_query": "Actually, I want sites that are more than 30 acres.",
+    #     "expanded_query": result['expanded_query'],
+    #     "sql_query": result['sql_query'],
+    #     "results": result['results'],
+    #     "error": result['error'],
+    #     "last_failed_sql": result['last_failed_sql'],
     #     "attempt": 0,
+    #     "conversation": result['conversation']
     # }
-    
-    # Example 2: Refining the query to exclude wetlands
-    # initial_state = {
-    #     "question": "Exclude parcels that are within or intersect wetlands.",
-    #     "schema": schema_text,
-    #     "sql": None,
-    #     "previous_sql": "SELECT DISTINCT ON (pd.parcel_id) pd.* FROM parcels.parcel_details pd JOIN geographic_features.infrastructure hv ON ST_DWithin(pd.geometry, hv.geometry, 1000) WHERE hv.voltage > 138000 JOIN geographic_features.infrastructure ss ON ST_DWithin(pd.geometry, ss.geometry, 2000) WHERE ss.class = 'substation' LIMIT 10;",
-    #     "error": None,
-    #     "result": None,
-    #     "attempt": 0,
-    # }
-    
-    # --- Run the Graph ---
-    # Example 1: Initial query
-    # initial_state = {
-    #     "question": "Find parcels within 1 km of a transmission line above 138 kV and within 2 km of a substation.",
-    #     "schema": schema_text,
-    #     "sql": None,
-    #     "previous_sql": None,
-    #     "error": None,
-    #     "result": None,
-    #     "attempt": 0,
-    # }
-
-    # final_state = app.invoke(initial_state)
-    
-    # # Example 2: Refining the query to exclude wetlands
-    # initial_state = {
-    #     "question": "Exclude parcels that are less than 10 acres",
-    #     "schema": schema_text,
-    #     "sql": None,
-    #     "previous_sql": final_state["sql"],
-    #     "error": None,
-    #     "result": None,
-    #     "attempt": 0,
-    # }
-
-    # final_state = app.invoke(initial_state)
-
-    # print("\n✅ Final SQL Query:\n", final_state["sql"])
-    # print("\n📊 Query Result:\n", final_state["result"])
-    # print("\n🧠 Attempts:", final_state["attempt"])
-
-
-
-    # initial_state = {
-    #     "question": "Show only vacant or agricultural parcels, not residential",
-    #     "schema": schema_text,
-    #     "sql": None,
-    #     "previous_sql": None,
-    #     "error": None,
-    #     "result": None,
-    #     "attempt": 0,
-    # }
-
-    # final_state = app.invoke(initial_state)
-
-    # print("\n✅ Final SQL Query:\n", final_state["sql"])
-    # print("\n📊 Query Result:\n", final_state["result"])
-    # print("\n🧠 Attempts:", final_state["attempt"])
+    # result = app.invoke(state)
+    # print(result)
