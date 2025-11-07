@@ -23,6 +23,7 @@ COMMENT ON COLUMN parcels.parcel_details.municipality_name IS 'UPPERCASE municip
 COMMENT ON COLUMN parcels.parcel_details.area_m2 IS 'Area of the parcel in square meters';
 COMMENT ON COLUMN parcels.parcel_details.area_acres IS 'Area of the parcel in acres';
 COMMENT ON COLUMN parcels.parcel_details.source IS 'Source dataset or data provider for this parcel';
+COMMENT ON COLUMN parcels.parcel_details.ground_mounted_capacity_kw IS 'Ground-mounted solar capacity in kilowatts';
 
 -- Indexes
 CREATE INDEX ON parcels.parcel_details USING GIST (geometry_26986);
