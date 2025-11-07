@@ -134,7 +134,7 @@ VAGUE = [
 UNRELATED = [
     {
         "question":
-            "What is the current temperature",
+            "What is the current temperature in Boston?",
         "sql": None
     }
 ]

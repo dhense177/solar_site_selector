@@ -52,7 +52,7 @@ const Index = () => {
     <div className="h-screen flex flex-col bg-gradient-soft">
       {/* Header */}
       <header className="bg-background border-b border-border shadow-soft">
-        <div className="container mx-auto px-4 py-2">
+        <div className="container mx-auto px-4 py-2 relative">
           <div className="flex items-center justify-between">
             <div className="flex items-center h-16">
               <img 
@@ -61,6 +61,9 @@ const Index = () => {
                 className="h-full w-auto object-contain"
               />
             </div>
+            <h1 className="text-2xl font-bold absolute left-1/2 transform -translate-x-1/2" style={{ color: '#FFB300', fontFamily: 'Futura Md BT, sans-serif' }}>
+              Utility-Scale Solar Site Selection Assistant
+            </h1>
             <Button
               variant="ghost"
               size="sm"
