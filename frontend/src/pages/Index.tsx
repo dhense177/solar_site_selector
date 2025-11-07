@@ -62,7 +62,7 @@ const Index = () => {
               />
             </div>
             <h1 className="text-2xl font-bold absolute left-1/2 transform -translate-x-1/2" style={{ color: '#FFB300', fontFamily: 'Futura Md BT, sans-serif' }}>
-              Utility-Scale Solar Site Selection Assistant
+              Massachusetts Utility-Scale Solar Site Selection Assistant
             </h1>
             <Button
               variant="ghost"

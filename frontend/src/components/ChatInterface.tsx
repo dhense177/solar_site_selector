@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
-import { Send, Loader2, Sparkles, RotateCcw } from "lucide-react";
+import { Send, Loader2, RotateCcw } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 interface Message {
@@ -186,11 +186,15 @@ const ChatInterface = ({ onParcelsFound }: ChatInterfaceProps) => {
       <div className="flex-1 overflow-y-auto space-y-4 p-4">
         {messages.length === 0 ? (
           <div className="space-y-4">
-            <div className="text-center py-8">
-              <Sparkles className="w-12 h-12 text-primary mx-auto mb-4" />
-              <h3 className="text-lg font-semibold mb-2">Ask About Solar Parcels</h3>
-              <p className="text-sm text-muted-foreground mb-6">
-                Use the suggested prompts below or ask your own question
+            <div className="text-center pt-4 pb-8">
+              <img 
+                src="/solar_panel.png" 
+                alt="Solar Panel" 
+                className="w-24 h-24 mx-auto mb-4 object-contain"
+              />
+              <h3 className="text-lg font-semibold mb-2">Find Parcels For Your Solar Project</h3>
+              <p className="text-sm text-muted-foreground mb-3">
+                Use suggested prompts below or ask your own question
               </p>
             </div>
             <div className="grid gap-2">
@@ -250,7 +254,8 @@ const ChatInterface = ({ onParcelsFound }: ChatInterfaceProps) => {
             onClick={() => handleSubmit()}
             disabled={isLoading || !input.trim()}
             size="icon"
-            className="h-[60px] w-[60px] bg-gradient-primary hover:opacity-90"
+            className="h-[60px] w-[60px] hover:opacity-90"
+            style={{ backgroundColor: '#258222' }}
           >
             {isLoading ? (
               <Loader2 className="w-5 h-5 animate-spin" />
