@@ -88,28 +88,73 @@ def clean_sql(sql: str) -> str:
     
     return sql.strip()
 
-
-# def ensure_geometry_as_geojson(sql: str) -> str:
-#     """Convert raw geometry to GeoJSON format."""
-#     if not sql or 'ST_AsGeoJSON' in sql:
-#         return sql
-    
-#     # Find table alias (default to pd)
-#     alias_match = re.search(r'FROM\s+parcels\.parcel_details\s+(?:AS\s+)?(\w+)', sql, re.IGNORECASE)
-#     alias = alias_match.group(1) if alias_match else 'pd'
-#     geometry_col = f"{alias}.geometry"
-    
-#     # Replace raw geometry with GeoJSON
-#     sql = re.sub(
-#         rf'\b{re.escape(geometry_col)}\b',
-#         f'ST_AsGeoJSON({geometry_col})::json as geometry',
-#         sql,
-#         flags=re.IGNORECASE
-#     )
-    
-#     return sql
-
 # --- NODES ---
+
+def resolve_vague_conditions(state: SQLState):
+    """
+    Detect vague or underspecified conditions in the user's query.
+    Attempt to infer reasonable replacements using schema + geography context.
+    Ask user to confirm or refine.
+    """
+
+    prompt = """
+    The user provided the following query:
+
+    "{user_query}"
+
+    Identify any vague or underspecified conditions (e.g., "Western Massachusetts", "large parcels", "near a substation").
+    For each vague condition:
+      1. Propose the most likely concrete interpretation based on the schema and common domain sense.
+      2. Return your best guess in the form of a structured list of suggested replacements.
+
+    Schema information:
+    {schema}
+
+    Respond ONLY as JSON in this format:
+    {{
+      "vague_conditions": [
+        {{
+          "original": "Western Massachusetts",
+          "suggested_replacement": "counties IN ('BERKSHIRE', 'FRANKLIN', 'HAMPSHIRE', 'HAMPDEN')",
+          "reasoning": "These are the four westernmost counties in MA"
+        }}
+      ]
+    }}
+    """
+
+    response = llm.invoke(prompt).content.strip()
+
+    # Try to parse JSON safely
+    import json
+    try:
+        data = json.loads(response)
+        vague_conditions = data.get("vague_conditions", [])
+    except Exception:
+        vague_conditions = []
+
+    if not vague_conditions:
+        # No vague items detected → proceed directly
+        return {"conversation": [{"role": "assistant", "content": "No vague conditions detected."}]}
+
+    # Build a confirmation message for user
+    message_lines = ["I noticed a few vague parts of your query:"]
+    for cond in vague_conditions:
+        message_lines.append(
+            f"- \"{cond['original']}\" → I interpreted as: {cond['suggested_replacement']}"
+        )
+    message_lines.append(
+        "\nIs this what you had in mind? You can confirm or clarify any of these."
+    )
+    clarification_message = "\n".join(message_lines)
+
+    return {
+        "conversation": [
+            {"role": "assistant", "content": clarification_message}
+        ],
+        # Optionally store for later refinement
+        "vague_conditions": vague_conditions,
+    }
+
 
 def contextual_query_understanding(state: SQLState):
     """Rewrite user's query in context using conversation memory."""
@@ -160,16 +205,6 @@ def generate_sql(state: SQLState):
     return {"sql_query": sql}
 
 
-# def execute_sql(state: SQLState):
-#     """Run SQL and capture success or failure."""
-#     sql_query = state.get("sql_query", "")
-#     try:
-#         with engine.connect() as conn:
-#             result = conn.execute(text(sql_query))
-#             rows = result.fetchall()
-#         return {"results": [dict(r._mapping) for r in rows], "error": None}
-#     except Exception as e:
-#         return {"error": str(e), "last_failed_sql": sql_query}
 def execute_sql(state: SQLState):
     con = engine.connect()
     rows, error = run_query(state["sql_query"], con)
@@ -279,6 +314,7 @@ def display_results(state: SQLState):
 # --- GRAPH CONSTRUCTION ---
 graph = StateGraph(SQLState)
 
+# graph.add_node("resolve_vague_conditions", resolve_vague_conditions)
 graph.add_node("contextual_query_understanding", contextual_query_understanding)
 graph.add_node("generate_sql", generate_sql)
 graph.add_node("execute_sql", execute_sql)
@@ -288,6 +324,7 @@ graph.add_node("display_results", display_results)
 
 graph.set_entry_point("contextual_query_understanding")
 
+# graph.add_edge("contextual_query_understanding","resolve_vague_conditions")
 graph.add_edge("contextual_query_understanding", "generate_sql")
 graph.add_edge("generate_sql", "execute_sql")
 graph.add_edge("execute_sql", "validate_sql")
