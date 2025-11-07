@@ -1,12 +1,12 @@
 from typing import Annotated, Optional, List, Dict, Any, TypedDict
 from langchain.chat_models import ChatOpenAI
 from langchain.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import StrOutputParser
+from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
 from langgraph.checkpoint.memory import MemorySaver
 from sqlalchemy import create_engine, text, inspect
-from prompts.text_to_sql_prompts import write_sql_template
+from prompts.text_to_sql_prompts import write_sql_template, topic_filter_template
 import os
 import dotenv
 import re
@@ -32,6 +32,8 @@ class SQLState(TypedDict):
     results: Optional[Any]
 
     # Error tracking
+    relevant_query_topic: Optional[bool]
+    topic_filter_message: Optional[str]  # Error message if topic filter fails
     error: Optional[str]
     last_failed_sql: Optional[str]
     attempt: int  # Track number of repair attempts
@@ -89,6 +91,53 @@ def clean_sql(sql: str) -> str:
     return sql.strip()
 
 # --- NODES ---
+def topic_filter(state: SQLState):
+    """Filter the user's query to ensure it is related to solar site selection."""
+    user_query = state.get("user_query", "")
+    prompt = ChatPromptTemplate.from_messages(
+        [("system", topic_filter_template), ("human", "{user_query}")]
+    )
+    chain = prompt | llm | JsonOutputParser()
+    data = chain.invoke({"user_query": user_query})
+    
+    is_relevant = data.get("solar_query", False)
+    
+    if not is_relevant:
+        error_message = data.get("message", "I can only assist with land parcel search and filtering for solar site selection.")
+        return {
+            "relevant_query_topic": False,
+            "topic_filter_message": error_message,
+            "error": error_message
+        }
+    
+    return {"relevant_query_topic": True}
+
+def contextual_query_understanding(state: SQLState):
+    """Rewrite user's query in context using conversation memory."""
+    conversation = state.get("conversation", [])
+    user_query = state.get("user_query", "")
+    
+    prompt = f"""
+    You are a helpful assistant that interprets user questions about a parcel database.
+    Use the prior conversation to make the current query self-contained.
+
+    Conversation so far:
+    {conversation}
+
+    Latest query:
+    {user_query}
+
+    Rewrite the latest query so it can be executed independently.
+    Return only the rewritten text.
+    """
+    rewritten = llm.invoke(prompt).content.strip()
+    return {
+        "expanded_query": rewritten,
+        "conversation": [
+            {"role": "user", "content": user_query},
+            {"role": "assistant", "content": rewritten},
+        ],
+    }
 
 def resolve_vague_conditions(state: SQLState):
     """
@@ -153,34 +202,6 @@ def resolve_vague_conditions(state: SQLState):
         ],
         # Optionally store for later refinement
         "vague_conditions": vague_conditions,
-    }
-
-
-def contextual_query_understanding(state: SQLState):
-    """Rewrite user's query in context using conversation memory."""
-    conversation = state.get("conversation", [])
-    user_query = state.get("user_query", "")
-    
-    prompt = f"""
-    You are a helpful assistant that interprets user questions about a parcel database.
-    Use the prior conversation to make the current query self-contained.
-
-    Conversation so far:
-    {conversation}
-
-    Latest query:
-    {user_query}
-
-    Rewrite the latest query so it can be executed independently.
-    Return only the rewritten text.
-    """
-    rewritten = llm.invoke(prompt).content.strip()
-    return {
-        "expanded_query": rewritten,
-        "conversation": [
-            {"role": "user", "content": user_query},
-            {"role": "assistant", "content": rewritten},
-        ],
     }
 
 
@@ -297,10 +318,16 @@ def repair_sql(state: SQLState):
     return {"sql_query": fixed, "error": None, "attempt": attempt + 1}
 
 
+
 def display_results(state: SQLState):
     """Final display node."""
     error = state.get("error")
     results = state.get("results")
+    conversation = state.get("conversation", [])
+    
+    # If there's an error and it's not already in conversation, add it
+    if error and (not conversation or conversation[-1].get("content") != error):
+        conversation.append({"role": "assistant", "content": error})
     
     if error:
         print("❌ Query failed:", error)
@@ -308,13 +335,15 @@ def display_results(state: SQLState):
         print(f"✅ Returned {len(results)} results")
     else:
         print("No results found.")
-    return state
+    
+    return {"conversation": conversation}
 
 
 # --- GRAPH CONSTRUCTION ---
 graph = StateGraph(SQLState)
 
 # graph.add_node("resolve_vague_conditions", resolve_vague_conditions)
+graph.add_node("topic_filter", topic_filter)
 graph.add_node("contextual_query_understanding", contextual_query_understanding)
 graph.add_node("generate_sql", generate_sql)
 graph.add_node("execute_sql", execute_sql)
@@ -322,9 +351,26 @@ graph.add_node("validate_sql", validate_sql)
 graph.add_node("repair_sql", repair_sql)
 graph.add_node("display_results", display_results)
 
-graph.set_entry_point("contextual_query_understanding")
+graph.set_entry_point("topic_filter")
 
-# graph.add_edge("contextual_query_understanding","resolve_vague_conditions")
+# Conditional routing after topic filter
+def route_after_topic_filter(state: SQLState):
+    """Route after topic filter: continue if relevant, error if not."""
+    # Check if topic filter failed - look for the error message we set
+    # Also check the boolean flag
+    if state.get("relevant_query_topic") is False:
+        return "display_results"
+    return "contextual_query_understanding"
+
+graph.add_conditional_edges(
+    "topic_filter",
+    route_after_topic_filter,
+    {
+        "contextual_query_understanding": "contextual_query_understanding",
+        "display_results": "display_results"
+    }
+)
+
 graph.add_edge("contextual_query_understanding", "generate_sql")
 graph.add_edge("generate_sql", "execute_sql")
 graph.add_edge("execute_sql", "validate_sql")

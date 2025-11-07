@@ -87,6 +87,18 @@ const ChatInterface = ({ onParcelsFound }: ChatInterfaceProps) => {
       // Indicate if this was a refinement
       const refinementNote = data.is_refinement ? "\n\n(Refining previous search...)" : "";
 
+      // Check if there's an error (topic filter failure or other error)
+      if (data.summary && data.summary.startsWith("Error: ")) {
+        const errorMessage = data.summary.replace("Error: ", "");
+        const assistantMessage: Message = {
+          role: "assistant",
+          content: errorMessage
+        };
+        setMessages(prev => [...prev, assistantMessage]);
+        onParcelsFound([]); // Clear parcels on error
+        return;
+      }
+
       if (data.parcels && data.parcels.length > 0) {
         console.log('ChatInterface: Received parcels from API:', {
           count: data.parcels.length,
