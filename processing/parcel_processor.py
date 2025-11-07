@@ -13,7 +13,7 @@ engine = create_engine(f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{
 
 
 def create_full_address(df):
-    df['full_address'] = df['OWN_ADDR'].fillna('') + ' ' + df['OWN_CITY'].fillna('') + ' ' + df['OWN_STATE'].fillna('') + ' ' + df['OWN_ZIP'].fillna('') + ' USA'
+    df['full_address'] = df['SITE_ADDR'].fillna('') + ' ' + df['WATERTOWN'].fillna('') + ' MA' + ' ' + df['ZIP'].fillna('') + ' USA'
 
     df['full_address'] = df['full_address'].apply(lambda x: ' '.join(x.strip() for x in x.split()))
     return df
