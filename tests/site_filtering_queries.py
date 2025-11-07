@@ -3,7 +3,9 @@ from sqlalchemy import create_engine
 import dotenv
 import os
 import time
-from sql_agent import invoke_app  # Use the helper function instead
+import random
+from langchain_core.runnables import RunnableConfig
+from sql_agent import app  # Use the helper function instead
 from db_actions.db_utils import run_query
 from sql_agent import get_all_tables_schema
 dotenv.load_dotenv()
@@ -56,9 +58,9 @@ STANDARD = [
     #         """
     # },
     {
-        "question":
+        "user_query":
             "Find me sites for a 2-megawatt ground-mount or freestanding solar system that requires about 12 acres of land and sells power back to the electricity grid such that a majority of electricity produced is not consumed on site",
-        "sql":"""
+        "sql_correct":"""
             SELECT *
             FROM parcels.parcel_details
             WHERE area_acres >= 12
@@ -163,44 +165,45 @@ MULTI_TURN = [
 if __name__ == "__main__":
     schema_text = get_all_tables_schema("")
 
-    # for query in STANDARD:
-    #     # start_time = time.time()
-    #     query['schema'] = schema_text
-    #     query['attempt'] = 0
-    #     # Use invoke_app helper function with a thread_id for checkpointing
-    #     results_dict = invoke_app(query, thread_id=f"test-{query.get('question', 'default')[:20]}")
+    for query in STANDARD:
+        config = RunnableConfig(configurable={"thread_id": random.randint(1,100000)})
+        # start_time = time.time()
+        query['schema'] = schema_text
+        query['attempt'] = 0
+        # Use invoke_app helper function with a thread_id for checkpointing
+        results_dict = app.invoke(query, config=config)
 
-    #     len_results = len(results_dict['result'])
+        len_results = len(results_dict['results'])
 
-    #     ground_truth, error = run_query(query['sql'], con)
-    #     len_ground_truth = len(ground_truth)
+        ground_truth, error = run_query(query['sql'], con)
+        len_ground_truth = len(ground_truth)
 
-    #     assert len_results == len_ground_truth, "Number of rows in results and ground truth do not match"
+        assert len_results == len_ground_truth, "Number of rows in results and ground truth do not match"
 
     #     # end_time = time.time()
     #     # print(f"Time taken: {end_time - start_time} seconds")
     #     # print(f"Number of rows: {len(rows)}")
 
 
-    for query in MULTI_TURN:
-        query['schema'] = schema_text
-        query['attempt'] = 0
+    # for query in MULTI_TURN:
+    #     query['schema'] = schema_text
+    #     query['attempt'] = 0
 
-        query['question'] = query['question1']
-        query['sql'] = query['sql1']
-        results_dict1 = invoke_app(query, thread_id=query['thread_id'])
-        len_results = len(results_dict1['result'])
-        ground_truth, error = run_query(query['sql1'], con)
-        len_ground_truth = len(ground_truth)
-        assert len_results == len_ground_truth, "Number of rows in results and ground truth do not match"
+    #     query['question'] = query['question1']
+    #     query['sql'] = query['sql1']
+    #     results_dict1 = invoke_app(query, thread_id=query['thread_id'])
+    #     len_results = len(results_dict1['result'])
+    #     ground_truth, error = run_query(query['sql1'], con)
+    #     len_ground_truth = len(ground_truth)
+    #     assert len_results == len_ground_truth, "Number of rows in results and ground truth do not match"
         
-        query['question'] = query['question2']
-        query['sql'] = query['sql2']
-        results_dict2 = invoke_app(query, thread_id=query['thread_id'])
-        len_results = len(results_dict2['result'])
-        ground_truth, error = run_query(query['sql2'], con)
-        len_ground_truth = len(ground_truth)
-        assert len_results == len_ground_truth, "Number of rows in results and ground truth do not match"
+    #     query['question'] = query['question2']
+    #     query['sql'] = query['sql2']
+    #     results_dict2 = invoke_app(query, thread_id=query['thread_id'])
+    #     len_results = len(results_dict2['result'])
+    #     ground_truth, error = run_query(query['sql2'], con)
+    #     len_ground_truth = len(ground_truth)
+    #     assert len_results == len_ground_truth, "Number of rows in results and ground truth do not match"
 
 
 """
