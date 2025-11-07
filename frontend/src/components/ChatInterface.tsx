@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
-import { Send, Loader2, Sparkles } from "lucide-react";
+import { Send, Loader2, Sparkles, RotateCcw } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 interface Message {
@@ -149,10 +149,27 @@ const ChatInterface = ({ onParcelsFound }: ChatInterfaceProps) => {
     setSessionId(null);
     setMessages([]);
     setInput("");
+    // Clear parcels on the map
+    onParcelsFound([]);
   };
 
   return (
     <div className="flex flex-col h-full">
+      {/* Header with Redo Search button */}
+      {messages.length > 0 && (
+        <div className="p-3 border-b bg-background/50">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleNewSearch}
+            className="w-full gap-2"
+          >
+            <RotateCcw className="w-4 h-4" />
+            Redo Search
+          </Button>
+        </div>
+      )}
+      
       {/* Messages */}
       <div className="flex-1 overflow-y-auto space-y-4 p-4">
         {messages.length === 0 ? (

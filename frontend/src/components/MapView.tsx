@@ -1,8 +1,10 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { MapContainer, TileLayer, Polygon, Popup, useMap } from "react-leaflet";
 import { LatLngExpression, LatLngBounds, LatLngTuple } from "leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Label } from "@/components/ui/label";
 
 // Fix Leaflet default icon issue
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -160,6 +162,9 @@ const MapView = ({ parcels, selectedParcel }: MapViewProps) => {
   // Default center: Massachusetts (approximately center of the state)
   const defaultCenter: [number, number] = [42.2373, -71.5314];
   const defaultZoom = 8;
+  
+  // Basemap toggle state
+  const [mapType, setMapType] = useState<"map" | "satellite">("map");
 
   // Render parcel polygons - simplified and more robust
   const parcelPolygons = useMemo(() => {
@@ -250,20 +255,44 @@ const MapView = ({ parcels, selectedParcel }: MapViewProps) => {
 
   return (
     <div className="relative w-full h-full rounded-lg overflow-hidden" style={{ minHeight: "400px", height: "100%" }}>
+      {/* Basemap Toggle - Top Right Corner */}
+      <div className="absolute top-2 right-2 z-[1000] bg-white rounded-md shadow-lg p-2 border">
+        <RadioGroup value={mapType} onValueChange={(value) => setMapType(value as "map" | "satellite")}>
+          <div className="flex items-center space-x-2">
+            <RadioGroupItem value="map" id="map" />
+            <Label htmlFor="map" className="text-sm cursor-pointer">Map</Label>
+          </div>
+          <div className="flex items-center space-x-2 mt-1">
+            <RadioGroupItem value="satellite" id="satellite" />
+            <Label htmlFor="satellite" className="text-sm cursor-pointer">Satellite</Label>
+          </div>
+        </RadioGroup>
+      </div>
+      
       <MapContainer
         center={defaultCenter}
         zoom={defaultZoom}
         style={{ height: "100%", width: "100%", minHeight: "400px", zIndex: 0 }}
         scrollWheelZoom={true}
         zoomControl={true}
+        key={mapType} // Force remount when map type changes
         whenReady={() => {
           console.log("Map container is ready, parcels:", parcels.length);
         }}
       >
-        <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        />
+        {mapType === "map" ? (
+          <TileLayer
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          />
+        ) : (
+          <TileLayer
+            attribution='&copy; <a href="https://www.mass.gov/massgis">MassGIS</a>'
+            url="https://tiles.arcgis.com/tiles/hGdibHYSPO59RG1h/arcgis/rest/services/orthos2023/MapServer/tile/{z}/{y}/{x}"
+            maxZoom={20}
+            minZoom={7}
+          />
+        )}
         
         <MapUpdater parcels={parcels} selectedParcel={selectedParcel} />
         
