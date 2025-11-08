@@ -47,6 +47,10 @@ class ParcelResponse(BaseModel):
     address: str
     county: str
     acreage: float
+    municipality: str
+    owner_name: str
+    total_value: float
+    capacity: float  # ground_mounted_capacity_kw
     explanation: str
     geometry: Dict[str, Any]  # GeoJSON geometry - REQUIRED
 
@@ -136,6 +140,18 @@ def transform_row_to_parcel(row: Dict[str, Any], explanation: Optional[str] = No
         address = row.get('full_address') or row.get('address') or ''
         county = row.get('county_name') or row.get('county') or ''
         acreage = float(row.get('area_acres') or row.get('acreage') or 0)
+        municipality = row.get('municipality_name') or row.get('municipality') or ''
+        owner_name = row.get('owner_name') or ''
+        total_value = row.get('total_value')
+        try:
+            total_value = float(total_value) if total_value is not None else 0.0
+        except:
+            total_value = 0.0
+        capacity = row.get('ground_mounted_capacity_kw') or row.get('capacity')
+        try:
+            capacity = float(capacity) if capacity is not None else 0.0
+        except:
+            capacity = 0.0
         
         # Convert geometry to GeoJSON - this is REQUIRED
         geom_data = row.get('geometry')
@@ -150,6 +166,10 @@ def transform_row_to_parcel(row: Dict[str, Any], explanation: Optional[str] = No
             address=address,
             county=county,
             acreage=acreage,
+            municipality=municipality,
+            owner_name=owner_name,
+            total_value=total_value,
+            capacity=capacity,
             explanation=explanation or "Found parcel matching your criteria",
             geometry=geo_json
         )

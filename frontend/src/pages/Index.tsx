@@ -10,6 +10,10 @@ interface Parcel {
   address: string;
   county: string;
   acreage: number;
+  municipality: string;
+  owner_name: string;
+  total_value: number;
+  capacity: number;
   explanation: string;
   geometry: {
     type: string;
@@ -61,7 +65,7 @@ const Index = () => {
                 className="h-full w-auto object-contain"
               />
             </div>
-            <h1 className="text-2xl font-bold absolute left-1/2 transform -translate-x-1/2" style={{ color: '#FFB300', fontFamily: 'Futura Md BT, sans-serif' }}>
+            <h1 className="text-2xl font-bold absolute left-1/2 transform -translate-x-1/2" style={{ color: '#FFB300', fontFamily: 'Helvetica, sans-serif' }}>
               Massachusetts Utility-Scale Solar Site Selection Assistant
             </h1>
             <Button

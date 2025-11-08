@@ -17,7 +17,15 @@ Mapping User Queries to Database Class Values:
 - If unsure about a mapping, explain in your reasoning what value you chose and why
 
 Output Instructions:
-- **CRITICAL**: ALWAYS include the 'geometry' field from parcel_details database table in your SELECT clause
+- **CRITICAL**: ALWAYS include the following fields from parcel_details database table in your SELECT clause:
+  * geometry (required for mapping)
+  * full_address (required)
+  * county_name (required)
+  * area_acres (required)
+  * municipality_name (required)
+  * owner_name (required)
+  * total_value (required)
+  * ground_mounted_capacity_kw (required)
 - **IMPORTANT**: Provide both the SQL query AND an explanation of your reasoning.
 """
 

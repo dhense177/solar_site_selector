@@ -13,9 +13,15 @@ engine = create_engine(f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{
 
 
 def create_full_address(df):
-    df['full_address'] = df['SITE_ADDR'].fillna('') + ' ' + df['WATERTOWN'].fillna('') + ' MA' + ' ' + df['ZIP'].fillna('') + ' USA'
+    df['full_address'] = df['SITE_ADDR'].fillna('') + ' ' + df['CITY'].fillna('') + ' MA' + ' ' + df['ZIP'].fillna('') + ' USA'
 
     df['full_address'] = df['full_address'].apply(lambda x: ' '.join(x.strip() for x in x.split()))
+
+    # Remove rows with empty full_address
+    df = df[df['full_address'].isnull()==False].reset_index(drop=True)
+
+    # Replace leading 0
+    df['full_address'] = df['full_address'].apply(lambda s: s.replace('0 ','') if s.startswith('0 ') else s)
     return df
 
 
@@ -92,11 +98,13 @@ def process_parcels(file_path):
     df_parcels_west = create_full_address(df_parcels_west)
 
     # Filter out unneccessary columns
-    cols_to_keep = ['full_address', 'geometry']
+    cols_to_keep = ['full_address', 'geometry', 'OWNER1', 'TOTAL_VAL']
     df_parcels_east = df_parcels_east[cols_to_keep]
     df_parcels_west = df_parcels_west[cols_to_keep]
 
     gdf = concatenate_east_west(df_parcels_east, df_parcels_west)
+
+    gdf = gdf.rename(columns={'OWNER1': 'owner_name', 'TOTAL_VAL': 'total_value'})
 
     gdf = create_area_columns(gdf)
 

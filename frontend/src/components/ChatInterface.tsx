@@ -14,6 +14,10 @@ interface Parcel {
   address: string;
   county: string;
   acreage: number;
+  municipality: string;
+  owner_name: string;
+  total_value: number;
+  capacity: number;
   explanation: string;
   geometry: {
     type: string;

@@ -18,6 +18,10 @@ interface Parcel {
   address: string;
   county: string;
   acreage: number;
+  municipality: string;
+  owner_name: string;
+  total_value: number;
+  capacity: number;
   explanation: string;
   geometry: {
     type: string;
@@ -330,7 +334,19 @@ const MapView = ({ parcels, selectedParcel }: MapViewProps) => {
                       <strong>County:</strong> {parcel.county || "Unknown"}
                     </p>
                     <p className="text-xs text-muted-foreground">
+                      <strong>Municipality:</strong> {parcel.municipality || "Unknown"}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
                       <strong>Acres:</strong> {parcel.acreage?.toFixed(2) || "0.00"}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      <strong>Owner:</strong> {parcel.owner_name || "Unknown"}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      <strong>Total Value:</strong> ${parcel.total_value.toLocaleString()}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      <strong>Capacity:</strong> {parcel.capacity.toLocaleString()} kW
                     </p>
                   </div>
                 </Popup>
