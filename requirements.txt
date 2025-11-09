@@ -15,9 +15,8 @@ psycopg2-binary>=2.9.11
 geoalchemy2>=0.18.0
 sqlalchemy>=2.0.0
 
-# Geometry processing
+# Geometry processing (geopandas removed - not used in API, only in processing scripts)
 shapely>=2.0.0
-geopandas>=1.1.1
 
 # Other dependencies
 python-multipart>=0.0.6
