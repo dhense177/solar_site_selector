@@ -45,12 +45,8 @@ frontend/dist/
 uv.lock
 pyproject.toml
 
-# Keep these for API deployment
-# api/ - needed
-# api_server.py - needed
-# sql_agent.py - needed
-# prompts/ - needed
-# db_actions/ - needed (for db_utils.py)
-# requirements.txt - needed
-# runtime.txt - needed
+# Exclude backend directory - deploy frontend only
+backend/
+# Keep api/ for Vercel serverless functions (if needed)
+# api/ - needed for Vercel serverless functions
 

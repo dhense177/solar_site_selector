@@ -2,6 +2,8 @@
 Script to export the LangGraph diagram to a PNG file.
 """
 import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'backend'))
 from sql_agent import app
 
 # Get the graph from the compiled app

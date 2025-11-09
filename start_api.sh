@@ -5,5 +5,5 @@
 # source venv/bin/activate
 
 # Start the FastAPI server
-python api_server.py
+cd backend && python api_server.py
 

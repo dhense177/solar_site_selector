@@ -5,8 +5,10 @@ This file is required by Vercel to find the FastAPI application
 import sys
 import os
 
-# Add parent directory to path so we can import api_server
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Add backend directory to path so we can import api_server
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+backend_path = os.path.join(project_root, 'backend')
+sys.path.insert(0, backend_path)
 
 from api_server import api_app
 
