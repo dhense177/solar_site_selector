@@ -18,8 +18,15 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeou
 api_app = FastAPI(title="Solar Parcel Search API")
 
 # Add error handler for debugging
+# HTTPException should be handled by FastAPI's default handler
+# Only catch non-HTTP exceptions
 @api_app.exception_handler(Exception)
 async def global_exception_handler(request, exc):
+    from fastapi import HTTPException
+    # If it's an HTTPException, let FastAPI handle it (don't catch it)
+    if isinstance(exc, HTTPException):
+        raise exc
+    # Only handle non-HTTP exceptions
     import traceback
     error_details = {
         "error": str(exc),
@@ -322,15 +329,17 @@ async def health_check():
 
 
 # Catch-all route for non-API paths - return 404
-@api_app.get("/{path:path}")
-@api_app.post("/{path:path}")
-@api_app.put("/{path:path}")
-@api_app.delete("/{path:path}")
+# This must be last to catch all unmatched routes
+@api_app.get("/{path:path}", include_in_schema=False)
+@api_app.post("/{path:path}", include_in_schema=False)
+@api_app.put("/{path:path}", include_in_schema=False)
+@api_app.delete("/{path:path}", include_in_schema=False)
+@api_app.options("/{path:path}", include_in_schema=False)
 async def catch_all(path: str):
     """Catch-all route that returns 404 for non-API routes"""
-    # Only handle /api/* routes
+    # Only handle /api/* routes - everything else should go to frontend
     if not path.startswith("api/"):
-        raise HTTPException(status_code=404, detail="Not Found - This endpoint only handles /api/* routes")
+        raise HTTPException(status_code=404, detail="Not Found - This API only handles /api/* routes")
     raise HTTPException(status_code=404, detail=f"API endpoint not found: /{path}")
 
 
