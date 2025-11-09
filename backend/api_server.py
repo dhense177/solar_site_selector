@@ -49,7 +49,8 @@ async def global_exception_handler(request, exc):
 # Get allowed origins from environment variable or use defaults
 allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "")
 if allowed_origins_env:
-    allowed_origins = [origin.strip() for origin in allowed_origins_env.split(",")]
+    # Strip whitespace and trailing slashes from origins
+    allowed_origins = [origin.strip().rstrip('/') for origin in allowed_origins_env.split(",")]
 else:
     allowed_origins = [
         "http://localhost:5173",
