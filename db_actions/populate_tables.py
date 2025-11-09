@@ -14,9 +14,15 @@ from processing.environmental_data_processor import process_fema_flood_zones, pr
 
 dotenv.load_dotenv()
 
-user, password, host, port, db_name = os.environ["DB_USER"], os.environ["DB_PASSWORD"], "localhost", "5432", os.environ["DB_NAME"]
+db_host = os.getenv("DB_HOST", "local")
+if db_host == "local":
+    user, password, host, port, db_name = os.environ["DB_USER"], os.environ["DB_PASSWORD"], "localhost", "5432", os.environ["DB_NAME"]
+    engine = create_engine(f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{db_name}")
+else:
+    subase_connection_string = os.getenv("SUPABASE_URL_SESSION")
+    engine = create_engine(subase_connection_string)
 
-engine = create_engine(f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{db_name}")
+
 
 con = duckdb.connect()
 con.execute("INSTALL spatial; LOAD spatial;")
@@ -58,6 +64,7 @@ if geographic_features_only:
     # Land Cover Features
     print("** Populating geographic features tables **")
 
+    print("** Populating land cover features **")
     gdf_join = extract_environmental_features(con)
     gdf_join.to_postgis(
         name="land_cover",
@@ -68,6 +75,7 @@ if geographic_features_only:
     )
 
     # Land Use Features
+    print("** Populating land use features **")
     gdf_join = extract_landuse(con)
     gdf_join.to_postgis(
         name="land_use",
@@ -78,6 +86,7 @@ if geographic_features_only:
     )
 
     # Protected Open Spaces
+    print("** Populating protected open spaces **")
     gdf_join = process_protected_open_spaces()
     gdf_join.to_postgis(
         name="open_spaces",
@@ -88,16 +97,18 @@ if geographic_features_only:
     )
 
     # FEMA Flood Zones
-    gdf_join = process_fema_flood_zones()
-    gdf_join.to_postgis(
-        name="flood_zones",
-        con=engine,
-        schema="geographic_features",
-        if_exists="append",
-        index=False
-    )
+    # print("** Populating FEMA flood zones **")
+    # gdf_join = process_fema_flood_zones()
+    # gdf_join.to_postgis(
+    #     name="flood_zones",
+    #     con=engine,
+    #     schema="geographic_features",
+    #     if_exists="append",
+    #     index=False
+    # )
 
     # Priority Habitats
+    print("** Populating priority habitats **")
     gdf_join = process_priority_habitats()
     gdf_join.to_postgis(
         name="priority_habitats",
@@ -108,6 +119,7 @@ if geographic_features_only:
     )
 
     # Prime Farmland Soils
+    print("** Populating prime farmland soils **")
     gdf_join = process_prime_soils()
     gdf_join.to_postgis(
         name="prime_farmland_soils",
@@ -123,6 +135,7 @@ if infra_features_only:
 
 
     # Infrastructure Features
+    print("** Populating infrastructure features **")
     gdf_join = extract_infrastructure(con)
     gdf_join.to_postgis(
         name="infrastructure",
@@ -133,6 +146,7 @@ if infra_features_only:
     )
 
     # Transportation Features
+    print("** Populating transportation features **")
     gdf_join = extract_transportation(con)
     gdf_join.to_postgis(
         name="transportation",

@@ -6,7 +6,14 @@ import dotenv
 
 dotenv.load_dotenv()
 
-user, password, host, port, db_name = os.environ["DB_USER"], os.environ["DB_PASSWORD"], "localhost", "5432", os.environ["DB_NAME"]
+db_host = os.getenv("DB_HOST", "local")
+if db_host == "local":
+    user, password, host, port, db_name = os.environ["DB_USER"], os.environ["DB_PASSWORD"], "localhost", "5432", os.environ["DB_NAME"]
+    conn = psycopg2.connect(dbname="postgres", user=user, password=password, host=host, port=port)
+else:
+    subase_connection_string = os.getenv("SUPABASE_URL_SESSION")
+    conn = psycopg2.connect(subase_connection_string)
+    db_name = os.environ["DB_NAME"]
 
 # Check if only recreating geographic_features
 GEOGRAPHIC_FEATURES = os.getenv("RECREATE_GEO_FEATURES", "false").lower() == "true"
@@ -16,7 +23,7 @@ PARCELS = os.getenv("RECREATE_PARCELS", "false").lower() == "true"
 # --- (Re)create DB ---
 if GEOGRAPHIC_FEATURES and INFRASTRUCTURE_FEATURES and PARCELS:
     print("** Recreating Database **")
-    conn = psycopg2.connect(dbname="postgres", user=user, password=password, host=host, port=port)
+    # conn = psycopg2.connect(dbname="postgres", user=user, password=password, host=host, port=port)
     conn.autocommit = True
     cur = conn.cursor()
     
@@ -34,18 +41,18 @@ if GEOGRAPHIC_FEATURES and INFRASTRUCTURE_FEATURES and PARCELS:
     cur.execute(f"DROP DATABASE IF EXISTS {db_name};")
     cur.execute(f"CREATE DATABASE {db_name};")
     cur.close()
-    conn.close()
+    # conn.close()
 
     # --- Enable PostGIS ---
-    conn = psycopg2.connect(dbname=db_name, user=user, password=password, host=host, port=port)
+    # conn = psycopg2.connect(dbname=db_name, user=user, password=password, host=host, port=port)
     cur = conn.cursor()
     cur.execute("CREATE EXTENSION IF NOT EXISTS postgis;")
     conn.commit()
     cur.close()
-    conn.close()
+    # conn.close()
 
 # --- Create Schemas & Tables ---
-conn = psycopg2.connect(dbname=db_name, user=user, password=password, host=host, port=port)
+# conn = psycopg2.connect(dbname=db_name, user=user, password=password, host=host, port=port)
 cur = conn.cursor()
 
 # Recreate geographic_features tables

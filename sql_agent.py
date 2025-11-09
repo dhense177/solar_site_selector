@@ -14,8 +14,12 @@ from db_actions.db_utils import run_query
 dotenv.load_dotenv()
 
 # --- CONFIG ---
-user, password, host, port, db_name = os.environ["DB_USER"], os.environ["DB_PASSWORD"], "localhost", "5432", os.environ["DB_NAME"]
-engine = create_engine(f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{db_name}")
+if os.getenv("DB_HOST") == "local":
+    user, password, host, port, db_name = os.environ["DB_USER"], os.environ["DB_PASSWORD"], "localhost", "5432", os.environ["DB_NAME"]
+    engine = create_engine(f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{db_name}")
+else:
+    subase_connection_string = os.getenv("SUPABASE_URL_SESSION")
+    engine = create_engine(subase_connection_string)
 
 llm = ChatOpenAI(model="gpt-4.1", temperature=0.2)
 
