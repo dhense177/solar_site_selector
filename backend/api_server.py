@@ -55,6 +55,9 @@ else:
         "http://127.0.0.1:8080",
     ]
 
+# Log allowed origins for debugging
+print(f"CORS allowed origins: {allowed_origins}")
+
 api_app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,

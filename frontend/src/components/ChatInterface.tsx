@@ -72,8 +72,22 @@ const ChatInterface = ({ onParcelsFound }: ChatInterfaceProps) => {
       console.log('Response status:', response.status);
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ detail: "Unknown error" }));
-        const errorMessage = errorData.detail || `HTTP error! status: ${response.status}`;
+        let errorMessage = `HTTP error! status: ${response.status}`;
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.detail || errorData.error || errorMessage;
+          console.error('API error response:', errorData);
+        } catch (e) {
+          // Response is not JSON, try to get text
+          try {
+            const errorText = await response.text();
+            console.error('API error (non-JSON):', errorText);
+            errorMessage = errorText || errorMessage;
+          } catch (e2) {
+            console.error('Failed to parse error response:', e2);
+            errorMessage = `HTTP ${response.status}: ${response.statusText || 'Unknown error'}`;
+          }
+        }
         console.error('API error:', errorMessage);
         throw new Error(errorMessage);
       }
