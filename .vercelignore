@@ -47,6 +47,11 @@ pyproject.toml
 
 # Exclude backend directory - deploy frontend only
 backend/
-# Keep api/ for Vercel serverless functions (if needed)
-# api/ - needed for Vercel serverless functions
+api/
+api_server.py
+sql_agent.py
+requirements.txt
+runtime.txt
+Procfile
+railway.json
 
