@@ -1,0 +1,24 @@
+# Core dependencies for Vercel deployment
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+pydantic>=2.0.0
+python-dotenv>=1.0.0
+
+# LangChain dependencies
+langchain-community>=0.3.26
+langchain-core>=0.3.67
+langchain-openai>=0.3.27
+langgraph>=0.5.0
+
+# Database dependencies
+psycopg2-binary>=2.9.11
+geoalchemy2>=0.18.0
+sqlalchemy>=2.0.0
+
+# Geometry processing
+shapely>=2.0.0
+geopandas>=1.1.1
+
+# Other dependencies
+python-multipart>=0.0.6
+

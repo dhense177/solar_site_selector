@@ -18,9 +18,12 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeou
 api_app = FastAPI(title="Solar Parcel Search API")
 
 # Configure CORS
-api_app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
+# Get allowed origins from environment variable or use defaults
+allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "")
+if allowed_origins_env:
+    allowed_origins = [origin.strip() for origin in allowed_origins_env.split(",")]
+else:
+    allowed_origins = [
         "http://localhost:5173",
         "http://localhost:3000",
         "http://localhost:4173",
@@ -31,7 +34,11 @@ api_app.add_middleware(
         "http://127.0.0.1:4173",
         "http://127.0.0.1:5174",
         "http://127.0.0.1:8080",
-    ],
+    ]
+
+api_app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
