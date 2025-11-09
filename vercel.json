@@ -5,7 +5,7 @@
   "routes": [
     {
       "src": "/api/(.*)",
-      "dest": "/serverless_api/main.py"
+      "dest": "/api/main.py"
     },
     {
       "src": "/(.*)",
