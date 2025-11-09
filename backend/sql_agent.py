@@ -13,14 +13,59 @@ import re
 from db_actions.db_utils import run_query
 dotenv.load_dotenv()
 
+# --- DEBUG: Print all environment variables (without sensitive values) ---
+print("=" * 80)
+print("ENVIRONMENT VARIABLES DEBUG:")
+print("=" * 80)
+# List all environment variables that might be relevant
+relevant_vars = [
+    "DATABASE_URL", "SUPABASE_URL_SESSION", "SUPABASE_PWD",
+    "DB_HOST", "DB_USER", "DB_PASSWORD", "DB_NAME", "DB_PORT",
+    "PGHOST", "PGUSER", "PGPASSWORD", "PGDATABASE", "PGPORT",
+    "OPENAI_API_KEY", "ALLOWED_ORIGINS"
+]
+for var in relevant_vars:
+    value = os.getenv(var)
+    if value:
+        # Mask sensitive values
+        if "PASSWORD" in var or "PWD" in var or "KEY" in var:
+            print(f"{var}: {'*' * min(len(value), 20)}")
+        elif "URL" in var or "HOST" in var:
+            # Show URL but mask password if present
+            if "@" in value:
+                parts = value.split("@")
+                if len(parts) == 2:
+                    user_pass = parts[0].split("://")[-1]
+                    if ":" in user_pass:
+                        user, _ = user_pass.split(":", 1)
+                        print(f"{var}: {value.split('://')[0]}://{user}:***@{parts[1]}")
+                    else:
+                        print(f"{var}: {value}")
+                else:
+                    print(f"{var}: {value}")
+            else:
+                print(f"{var}: {value}")
+        else:
+            print(f"{var}: {value}")
+    else:
+        print(f"{var}: NOT SET")
+print("=" * 80)
+
 # --- CONFIG ---
 # Database connection setup
-# Priority: 1) SUPABASE_URL_SESSION, 2) DB_* variables (local or hosted)
+# Priority: 1) DATABASE_URL (Railway default), 2) SUPABASE_URL_SESSION, 3) DB_* variables, 4) PG* variables
 
-supabase_connection_string = os.getenv("SUPABASE_URL_SESSION")
-if supabase_connection_string:
+# Check for DATABASE_URL first (Railway's default when you link a PostgreSQL service)
+database_url = os.getenv("DATABASE_URL")
+if database_url:
+    print("Using DATABASE_URL connection string")
+    # Railway's DATABASE_URL might be postgres://, convert to postgresql+psycopg2://
+    if database_url.startswith("postgres://"):
+        database_url = database_url.replace("postgres://", "postgresql+psycopg2://", 1)
+    engine = create_engine(database_url)
+elif os.getenv("SUPABASE_URL_SESSION"):
     print("Using Supabase connection string")
-    engine = create_engine(supabase_connection_string)
+    engine = create_engine(os.getenv("SUPABASE_URL_SESSION"))
 elif os.getenv("DB_HOST") == "local":
     # Local development
     print("Using local database connection")
@@ -31,25 +76,28 @@ elif os.getenv("DB_HOST") == "local":
         raise ValueError("Missing required local database environment variables: DB_USER, DB_PASSWORD, DB_NAME")
     engine = create_engine(f"postgresql+psycopg2://{user}:{password}@localhost:5432/{db_name}")
 else:
-    # Railway or other hosted database - use standard DB_* environment variables
+    # Railway or other hosted database - support both DB_* and PG* variable names
     print("Using hosted database connection (Railway)")
-    user = os.getenv("DB_USER")
-    password = os.getenv("DB_PASSWORD")
-    host = os.getenv("DB_HOST")
-    port = os.getenv("DB_PORT", "5432")
-    db_name = os.getenv("DB_NAME")
     
-    print(f"DB_HOST: {host}, DB_USER: {user}, DB_NAME: {db_name}, DB_PORT: {port}")
+    # Try DB_* variables first, then fall back to PG* variables (Railway default)
+    user = os.getenv("DB_USER") or os.getenv("PGUSER")
+    password = os.getenv("DB_PASSWORD") or os.getenv("PGPASSWORD")
+    host = os.getenv("DB_HOST") or os.getenv("PGHOST")
+    port = os.getenv("DB_PORT") or os.getenv("PGPORT", "5432")
+    db_name = os.getenv("DB_NAME") or os.getenv("PGDATABASE")
+    
+    print(f"Host: {host}, User: {user}, Database: {db_name}, Port: {port}")
+    print(f"Using variables: DB_*={'DB_USER' if os.getenv('DB_USER') else 'PGUSER'}")
     
     if not all([user, password, host, db_name]):
         missing = []
-        if not user: missing.append("DB_USER")
-        if not password: missing.append("DB_PASSWORD")
-        if not host: missing.append("DB_HOST")
-        if not db_name: missing.append("DB_NAME")
+        if not user: missing.append("DB_USER or PGUSER")
+        if not password: missing.append("DB_PASSWORD or PGPASSWORD")
+        if not host: missing.append("DB_HOST or PGHOST")
+        if not db_name: missing.append("DB_NAME or PGDATABASE")
         raise ValueError(
             f"Missing required database environment variables: {', '.join(missing)}. "
-            "Need either SUPABASE_URL_SESSION or all of: DB_USER, DB_PASSWORD, DB_HOST, DB_NAME"
+            "Need one of: DATABASE_URL, SUPABASE_URL_SESSION, or all of: DB_USER/PGUSER, DB_PASSWORD/PGPASSWORD, DB_HOST/PGHOST, DB_NAME/PGDATABASE"
         )
     
     connection_string = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{db_name}"
