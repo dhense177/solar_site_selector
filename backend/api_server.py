@@ -21,6 +21,7 @@ api_app = FastAPI(title="Solar Parcel Search API")
 @api_app.middleware("http")
 async def log_requests(request, call_next):
     print(f"Request: {request.method} {request.url.path}")
+    print(f"Request headers: {dict(request.headers)}")
     response = await call_next(request)
     print(f"Response: {response.status_code}")
     return response
@@ -218,7 +219,15 @@ def transform_row_to_parcel(row: Dict[str, Any], explanation: Optional[str] = No
 async def search_parcels_options():
     """Handle CORS preflight for /api/search"""
     from fastapi.responses import Response
-    return Response(status_code=200)
+    print("Handling OPTIONS request for /api/search")
+    return Response(
+        status_code=200,
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type",
+        }
+    )
 
 @api_app.post("/api/search", response_model=SearchResponse)
 async def search_parcels(request: QueryRequest):
@@ -309,6 +318,11 @@ async def search_parcels(request: QueryRequest):
         raise HTTPException(status_code=500, detail=f"Error processing query: {str(e)}")
 
 
+@api_app.get("/api/test")
+async def test_endpoint():
+    """Simple test endpoint to verify routing"""
+    return {"message": "API is working", "status": "ok"}
+
 @api_app.get("/api/health")
 async def health_check():
     """Health check endpoint"""
@@ -348,16 +362,20 @@ async def health_check():
 
 # Catch-all route for non-API paths - return 404
 # This must be last to catch all unmatched routes
-# Note: We don't include POST here to avoid conflicts with /api/search
+# Note: We don't include POST or OPTIONS here to avoid conflicts with /api/search
 @api_app.get("/", include_in_schema=False)
+async def root():
+    """Root endpoint"""
+    raise HTTPException(status_code=404, detail="Not Found - This API only handles /api/* routes")
+
 @api_app.get("/{path:path}", include_in_schema=False)
 @api_app.put("/{path:path}", include_in_schema=False)
 @api_app.delete("/{path:path}", include_in_schema=False)
-@api_app.options("/{path:path}", include_in_schema=False)
-async def catch_all(path: str = ""):
+async def catch_all(path: str):
     """Catch-all route that returns 404 for non-API routes"""
+    print(f"Catch-all route hit: {path}")
     # Only handle /api/* routes - everything else should go to frontend
-    if not path or not path.startswith("api/"):
+    if not path.startswith("api/"):
         raise HTTPException(status_code=404, detail="Not Found - This API only handles /api/* routes")
     raise HTTPException(status_code=404, detail=f"API endpoint not found: /{path}")
 
