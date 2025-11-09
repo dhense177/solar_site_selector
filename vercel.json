@@ -10,11 +10,6 @@
       "source": "/(.*)",
       "destination": "/index.html"
     }
-  ],
-  "functions": {
-    "api/main.py": {
-      "runtime": "python3.12"
-    }
-  }
+  ]
 }
 
