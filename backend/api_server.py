@@ -323,6 +323,11 @@ async def test_endpoint():
     """Simple test endpoint to verify routing"""
     return {"message": "API is working", "status": "ok"}
 
+@api_app.post("/api/test")
+async def test_post_endpoint():
+    """Simple POST test endpoint to verify POST routing"""
+    return {"message": "POST is working", "status": "ok"}
+
 @api_app.get("/api/health")
 async def health_check():
     """Health check endpoint"""
