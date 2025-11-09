@@ -17,6 +17,18 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeou
 # Initialize FastAPI app
 api_app = FastAPI(title="Solar Parcel Search API")
 
+# Add error handler for debugging
+@api_app.exception_handler(Exception)
+async def global_exception_handler(request, exc):
+    import traceback
+    error_details = {
+        "error": str(exc),
+        "type": type(exc).__name__,
+        "traceback": traceback.format_exc()
+    }
+    print(f"ERROR: {error_details}")  # Log to Vercel logs
+    return {"error": "Internal Server Error", "details": str(exc), "traceback": traceback.format_exc()}
+
 # Configure CORS
 # Get allowed origins from environment variable or use defaults
 allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "")
@@ -272,16 +284,41 @@ async def search_parcels(request: QueryRequest):
         raise HTTPException(status_code=500, detail=f"Error processing query: {str(e)}")
 
 
-@api_app.get("/")
-async def root():
-    """Root endpoint"""
-    return {"name": "Solar Parcel Search API", "version": "2.0.0"}
-
-
 @api_app.get("/api/health")
 async def health_check():
     """Health check endpoint"""
-    return {"status": "ok"}
+    error = None
+    traceback_str = None
+    sql_agent_loaded = False
+    
+    try:
+        # Check environment variables
+        env_vars = {
+            "DB_HOST": bool(os.getenv("DB_HOST")),
+            "DB_USER": bool(os.getenv("DB_USER")),
+            "DB_PASSWORD": bool(os.getenv("DB_PASSWORD")),
+            "DB_NAME": bool(os.getenv("DB_NAME")),
+            "OPENAI_API_KEY": bool(os.getenv("OPENAI_API_KEY")),
+            "SUPABASE_URL_SESSION": bool(os.getenv("SUPABASE_URL_SESSION")),
+            "SUPABASE_PWD": bool(os.getenv("SUPABASE_PWD")),
+        }
+        
+        # Try to import sql_agent
+        from sql_agent import app as sql_agent_app
+        sql_agent_loaded = True
+    except Exception as e:
+        import traceback
+        sql_agent_loaded = False
+        error = str(e)
+        traceback_str = traceback.format_exc()
+    
+    return {
+        "status": "ok" if sql_agent_loaded else "error",
+        "environment_variables": env_vars if 'env_vars' in locals() else {},
+        "sql_agent_loaded": sql_agent_loaded,
+        "error": error,
+        "traceback": traceback_str
+    }
 
 
 if __name__ == "__main__":
