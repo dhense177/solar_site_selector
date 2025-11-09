@@ -330,15 +330,16 @@ async def health_check():
 
 # Catch-all route for non-API paths - return 404
 # This must be last to catch all unmatched routes
+@api_app.get("/", include_in_schema=False)
 @api_app.get("/{path:path}", include_in_schema=False)
 @api_app.post("/{path:path}", include_in_schema=False)
 @api_app.put("/{path:path}", include_in_schema=False)
 @api_app.delete("/{path:path}", include_in_schema=False)
 @api_app.options("/{path:path}", include_in_schema=False)
-async def catch_all(path: str):
+async def catch_all(path: str = ""):
     """Catch-all route that returns 404 for non-API routes"""
     # Only handle /api/* routes - everything else should go to frontend
-    if not path.startswith("api/"):
+    if not path or not path.startswith("api/"):
         raise HTTPException(status_code=404, detail="Not Found - This API only handles /api/* routes")
     raise HTTPException(status_code=404, detail=f"API endpoint not found: /{path}")
 
