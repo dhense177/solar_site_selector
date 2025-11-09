@@ -1,11 +1,6 @@
 {
   "buildCommand": "cd frontend && npm install && npm run build",
   "outputDirectory": "frontend/dist",
-  "functions": {
-    "api/main.py": {
-      "includeFiles": "api_server.py,sql_agent.py,prompts/**/*,db_actions/db_utils.py,db_actions/__init__.py"
-    }
-  },
   "rewrites": [
     {
       "source": "/api/(.*)",
