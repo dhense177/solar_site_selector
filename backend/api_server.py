@@ -17,6 +17,14 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeou
 # Initialize FastAPI app
 api_app = FastAPI(title="Solar Parcel Search API")
 
+# Add middleware to log all requests for debugging
+@api_app.middleware("http")
+async def log_requests(request, call_next):
+    print(f"Request: {request.method} {request.url.path}")
+    response = await call_next(request)
+    print(f"Response: {response.status_code}")
+    return response
+
 # Add error handler for debugging
 # HTTPException should be handled by FastAPI's default handler
 # Only catch non-HTTP exceptions
@@ -206,9 +214,16 @@ def transform_row_to_parcel(row: Dict[str, Any], explanation: Optional[str] = No
         return None
 
 
+@api_app.options("/api/search")
+async def search_parcels_options():
+    """Handle CORS preflight for /api/search"""
+    from fastapi.responses import Response
+    return Response(status_code=200)
+
 @api_app.post("/api/search", response_model=SearchResponse)
 async def search_parcels(request: QueryRequest):
     """Search for parcels using natural language query"""
+    print(f"Received POST request to /api/search with query: {request.query}")
     try:
         session_id = request.session_id or str(uuid.uuid4())
         config = RunnableConfig(configurable={"thread_id": session_id})
@@ -333,9 +348,9 @@ async def health_check():
 
 # Catch-all route for non-API paths - return 404
 # This must be last to catch all unmatched routes
+# Note: We don't include POST here to avoid conflicts with /api/search
 @api_app.get("/", include_in_schema=False)
 @api_app.get("/{path:path}", include_in_schema=False)
-@api_app.post("/{path:path}", include_in_schema=False)
 @api_app.put("/{path:path}", include_in_schema=False)
 @api_app.delete("/{path:path}", include_in_schema=False)
 @api_app.options("/{path:path}", include_in_schema=False)
