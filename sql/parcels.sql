@@ -4,8 +4,8 @@ CREATE SCHEMA IF NOT EXISTS parcels;
 DROP TABLE IF EXISTS parcels.parcel_details;
 CREATE TABLE parcels.parcel_details (
     parcel_id character varying(1000) PRIMARY KEY,
-    geometry geometry(MULTIPOLYGON, 4326) NOT NULL,
-    geometry_26986 geometry(MULTIPOLYGON, 26986) NOT NULL,
+    geometry geometry(Geometry, 4326) NOT NULL,
+    geometry_26986 geometry(Geometry, 26986) NOT NULL,
     full_address character varying(1000) NOT NULL,
     owner_name character varying(1000),
     total_value numeric,
