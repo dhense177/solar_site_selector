@@ -14,12 +14,47 @@ from db_actions.db_utils import run_query
 dotenv.load_dotenv()
 
 # --- CONFIG ---
-if os.getenv("DB_HOST") == "local":
-    user, password, host, port, db_name = os.environ["DB_USER"], os.environ["DB_PASSWORD"], "localhost", "5432", os.environ["DB_NAME"]
-    engine = create_engine(f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{db_name}")
+# Database connection setup
+# Priority: 1) SUPABASE_URL_SESSION, 2) DB_* variables (local or hosted)
+
+supabase_connection_string = os.getenv("SUPABASE_URL_SESSION")
+if supabase_connection_string:
+    print("Using Supabase connection string")
+    engine = create_engine(supabase_connection_string)
+elif os.getenv("DB_HOST") == "local":
+    # Local development
+    print("Using local database connection")
+    user = os.getenv("DB_USER")
+    password = os.getenv("DB_PASSWORD")
+    db_name = os.getenv("DB_NAME")
+    if not all([user, password, db_name]):
+        raise ValueError("Missing required local database environment variables: DB_USER, DB_PASSWORD, DB_NAME")
+    engine = create_engine(f"postgresql+psycopg2://{user}:{password}@localhost:5432/{db_name}")
 else:
-    subase_connection_string = os.getenv("SUPABASE_URL_SESSION")
-    engine = create_engine(subase_connection_string)
+    # Railway or other hosted database - use standard DB_* environment variables
+    print("Using hosted database connection (Railway)")
+    user = os.getenv("DB_USER")
+    password = os.getenv("DB_PASSWORD")
+    host = os.getenv("DB_HOST")
+    port = os.getenv("DB_PORT", "5432")
+    db_name = os.getenv("DB_NAME")
+    
+    print(f"DB_HOST: {host}, DB_USER: {user}, DB_NAME: {db_name}, DB_PORT: {port}")
+    
+    if not all([user, password, host, db_name]):
+        missing = []
+        if not user: missing.append("DB_USER")
+        if not password: missing.append("DB_PASSWORD")
+        if not host: missing.append("DB_HOST")
+        if not db_name: missing.append("DB_NAME")
+        raise ValueError(
+            f"Missing required database environment variables: {', '.join(missing)}. "
+            "Need either SUPABASE_URL_SESSION or all of: DB_USER, DB_PASSWORD, DB_HOST, DB_NAME"
+        )
+    
+    connection_string = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{db_name}"
+    print(f"Creating engine with connection string: postgresql+psycopg2://{user}:***@{host}:{port}/{db_name}")
+    engine = create_engine(connection_string)
 
 llm = ChatOpenAI(model="gpt-4.1", temperature=0.2)
 
