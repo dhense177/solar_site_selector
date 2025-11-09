@@ -1,4 +1,6 @@
 .*
+!.vercelignore
+!.gitignore
 data/
 
 # Frontend build artifacts and dependencies
@@ -249,3 +251,4 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+.vercel

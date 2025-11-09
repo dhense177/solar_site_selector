@@ -1,0 +1,52 @@
+# Ignore large data files and unnecessary directories
+data/
+**/data/**
+**/*.gdb/
+**/*.shp
+**/*.dbf
+**/*.prj
+**/*.shx
+**/*.sbn
+**/*.sbx
+.venv/
+venv/
+env/
+ENV/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+*.log
+.DS_Store
+
+# Ignore unnecessary directories
+db_actions/
+processing/
+sql/
+tests/
+frontend/node_modules/
+frontend/.vite/
+frontend/dist/
+
+# Ignore config files
+.env
+.env.local
+.env.*.local
+*.lock
+uv.lock
+pyproject.toml
+
+# Keep these for API deployment
+# api_server.py - needed
+# sql_agent.py - needed
+# prompts/ - needed
+# api/ - needed
+# requirements.txt - needed
+# runtime.txt - needed
+
