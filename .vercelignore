@@ -48,10 +48,12 @@ pyproject.toml
 # Exclude backend directory - deploy frontend only
 backend/
 api/
-api_server.py
-sql_agent.py
+*.py
+!frontend/**/*.py
 requirements.txt
 runtime.txt
 Procfile
 railway.json
+nixpacks.toml
+Dockerfile
 
