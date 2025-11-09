@@ -23,9 +23,9 @@ COPY backend/ ./backend/
 # Set working directory to backend for imports to work correctly
 WORKDIR /app/backend
 
-# Expose port
-EXPOSE $PORT
+# Expose port (default to 8000 if PORT not set)
+EXPOSE 8000
 
-# Start the application
-CMD uvicorn api_server:api_app --host 0.0.0.0 --port ${PORT:-8000}
+# Start the application using shell form to expand $PORT
+CMD ["sh", "-c", "uvicorn api_server:api_app --host 0.0.0.0 --port ${PORT:-8000}"]
 
