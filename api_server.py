@@ -321,6 +321,19 @@ async def health_check():
     }
 
 
+# Catch-all route for non-API paths - return 404
+@api_app.get("/{path:path}")
+@api_app.post("/{path:path}")
+@api_app.put("/{path:path}")
+@api_app.delete("/{path:path}")
+async def catch_all(path: str):
+    """Catch-all route that returns 404 for non-API routes"""
+    # Only handle /api/* routes
+    if not path.startswith("api/"):
+        raise HTTPException(status_code=404, detail="Not Found - This endpoint only handles /api/* routes")
+    raise HTTPException(status_code=404, detail=f"API endpoint not found: /{path}")
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(api_app, host="0.0.0.0", port=8000)
