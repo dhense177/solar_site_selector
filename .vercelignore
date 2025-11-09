@@ -26,7 +26,10 @@ build/
 .DS_Store
 
 # Ignore unnecessary directories
-db_actions/
+# db_actions/ - NEEDED for db_utils.py
+db_actions/create_db.py
+db_actions/populate_tables.py
+db_actions/repopulate_database.sh
 processing/
 sql/
 tests/
