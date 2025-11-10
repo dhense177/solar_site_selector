@@ -15,6 +15,9 @@ def process_fema_flood_zones():
     gdf = gdf[gdf['geometry'].isnull()==False].reset_index(drop=True)
 
     gdf = create_reprojected_geometry_col(gdf,'geometry','geometry_26986','26986')
+
+    # Remove invalid geometries
+    gdf = gdf[gdf.is_valid].reset_index(drop=True)
     return gdf
 
 def process_protected_open_spaces():
@@ -44,4 +47,7 @@ def process_prime_soils():
     gdf = gdf.to_crs('EPSG:4326')
     gdf = gdf[['OBJECTID','geometry']].rename(columns={'OBJECTID': 'prime_soil_id'})
     gdf = create_reprojected_geometry_col(gdf,'geometry','geometry_26986','26986')
+
+    # Remove invalid geometries
+    gdf = gdf[gdf.is_valid].reset_index(drop=True)
     return gdf

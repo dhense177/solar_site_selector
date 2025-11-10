@@ -97,15 +97,16 @@ if geographic_features_only:
     )
 
     # FEMA Flood Zones
-    # print("** Populating FEMA flood zones **")
-    # gdf_join = process_fema_flood_zones()
-    # gdf_join.to_postgis(
-    #     name="flood_zones",
-    #     con=engine,
-    #     schema="geographic_features",
-    #     if_exists="append",
-    #     index=False
-    # )
+    print("** Populating FEMA flood zones **")
+    gdf_join = process_fema_flood_zones()
+    gdf_join.to_postgis(
+        name="flood_zones",
+        con=engine,
+        schema="geographic_features",
+        if_exists="append",
+        chunksize=5000,
+        index=False
+    )
 
     # Priority Habitats
     print("** Populating priority habitats **")
@@ -126,6 +127,7 @@ if geographic_features_only:
         con=engine,
         schema="geographic_features",
         if_exists="append",
+        chunksize=5000,
         index=False
     )
 
@@ -153,5 +155,6 @@ if infra_features_only:
         con=engine,
         schema="infrastructure_features",
         if_exists="append",
+        chunksize=5000,
         index=False
     )
