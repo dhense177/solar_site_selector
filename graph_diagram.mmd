@@ -6,6 +6,7 @@ config:
 graph TD;
 	__start__([<p>__start__</p>]):::first
 	topic_filter(topic_filter)
+	resolve_vague_conditions(resolve_vague_conditions)
 	contextual_query_understanding(contextual_query_understanding)
 	generate_sql(generate_sql)
 	execute_sql(execute_sql)
@@ -14,10 +15,12 @@ graph TD;
 	display_results(display_results)
 	__end__([<p>__end__</p>]):::last
 	__start__ --> topic_filter;
-	contextual_query_understanding --> generate_sql;
+	contextual_query_understanding --> resolve_vague_conditions;
 	execute_sql --> validate_sql;
 	generate_sql --> execute_sql;
 	repair_sql --> execute_sql;
+	resolve_vague_conditions -.-> display_results;
+	resolve_vague_conditions -.-> generate_sql;
 	topic_filter -.-> contextual_query_understanding;
 	topic_filter -.-> display_results;
 	validate_sql -.-> display_results;
