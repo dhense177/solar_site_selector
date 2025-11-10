@@ -61,14 +61,17 @@ A query is considered relevant if it is about:
 - proximity to power infrastructure (substations, transmission lines)
 - wetlands, protected areas, environmental constraints
 - GIS, mapping, geospatial filtering for solar siting
+- Follow-up questions, clarifications, or refinements to previous parcel queries (e.g., "show me more", "what about X county", "filter by Y", "narrow down", etc.)
 
 A query is NOT relevant if it is about:
 - general solar energy, panels, installation, or home solar
 - unrelated topics (shopping, travel, cooking, programming, personal questions, etc.)
 - general AI, databases, or code unrelated to parcel filtering
 
+**IMPORTANT**: If there is conversation context provided, consider that the current query might be a follow-up or refinement to a previous parcel search. In that case, it should be considered relevant even if it seems vague on its own.
+
 ### Behavior:
-1. If the query IS related to land parcel filtering or solar site selection:
+1. If the query IS related to land parcel filtering or solar site selection (including follow-ups):
    ➤ Return: {{"solar_query": true, "reason": "<short explanation>"}}
 
 2. If the query is NOT related:

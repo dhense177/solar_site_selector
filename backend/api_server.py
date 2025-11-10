@@ -260,8 +260,40 @@ async def search_parcels(request: QueryRequest):
         
         # Extract results
         sql_query = final_state.get('sql_query')
-        results = final_state.get('results', [])
+        results = final_state.get('results')
         error = final_state.get('error')
+        vague_conditions = final_state.get('vague_conditions', [])
+        
+        # Check if vague conditions were detected - if so, return the clarification message
+        if vague_conditions and len(vague_conditions) > 0:
+            # Extract the vague conditions message from conversation
+            explanation = ""
+            conversation = final_state.get('conversation', [])
+            if conversation:
+                for msg in reversed(conversation):
+                    # Handle both dict and AIMessage objects
+                    if isinstance(msg, dict):
+                        role = msg.get('role', '')
+                        content = msg.get('content', '')
+                    elif hasattr(msg, 'type'):  # AIMessage or HumanMessage
+                        role = "assistant" if msg.type == "ai" else "user"
+                        content = msg.content if hasattr(msg, 'content') else str(msg)
+                    elif hasattr(msg, 'content'):  # Generic message object
+                        role = "assistant"  # Default to assistant if we can't determine
+                        content = msg.content
+                    else:
+                        continue  # Skip unknown message types
+                    
+                    if role == 'assistant' and content:
+                        explanation = content
+                        break
+            
+            return SearchResponse(
+                parcels=[],
+                summary=explanation or "Please clarify vague conditions in your query.",
+                sql=None,
+                session_id=session_id
+            )
         
         if error:
             return SearchResponse(
@@ -271,13 +303,30 @@ async def search_parcels(request: QueryRequest):
                 session_id=session_id
             )
         
+        # Ensure results is a list, not None
+        if results is None:
+            results = []
+        
         # Extract explanation from conversation
         explanation = ""
         conversation = final_state.get('conversation', [])
         if conversation:
             for msg in reversed(conversation):
-                if isinstance(msg, dict) and msg.get('role') == 'assistant':
-                    explanation = msg.get('content', '')
+                # Handle both dict and AIMessage objects
+                if isinstance(msg, dict):
+                    role = msg.get('role', '')
+                    content = msg.get('content', '')
+                elif hasattr(msg, 'type'):  # AIMessage or HumanMessage
+                    role = "assistant" if msg.type == "ai" else "user"
+                    content = msg.content if hasattr(msg, 'content') else str(msg)
+                elif hasattr(msg, 'content'):  # Generic message object
+                    role = "assistant"  # Default to assistant if we can't determine
+                    content = msg.content
+                else:
+                    continue  # Skip unknown message types
+                
+                if role == 'assistant' and content:
+                    explanation = content
                     break
         
         # Convert all geometries to GeoJSON and transform to parcels
@@ -316,6 +365,10 @@ async def search_parcels(request: QueryRequest):
     except HTTPException:
         raise
     except Exception as e:
+        import traceback
+        error_traceback = traceback.format_exc()
+        print(f"ERROR in search_parcels: {str(e)}")
+        print(f"Traceback: {error_traceback}")
         raise HTTPException(status_code=500, detail=f"Error processing query: {str(e)}")
 
 

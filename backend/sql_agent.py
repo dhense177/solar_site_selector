@@ -124,6 +124,9 @@ class SQLState(TypedDict):
     error: Optional[str]
     last_failed_sql: Optional[str]
     attempt: int  # Track number of repair attempts
+    
+    # Vague conditions tracking
+    vague_conditions: Optional[List[Dict[str, str]]]  # List of vague conditions detected
 
     # Persistent multi-turn memory
     conversation: Annotated[List[Dict[str, str]], add_messages]
@@ -181,9 +184,47 @@ def clean_sql(sql: str) -> str:
 def topic_filter(state: SQLState):
     """Filter the user's query to ensure it is related to solar site selection."""
     user_query = state.get("user_query", "")
-    prompt = ChatPromptTemplate.from_messages(
-        [("system", topic_filter_template), ("human", "{user_query}")]
-    )
+    conversation = state.get("conversation", [])
+    
+    # Build conversation context string
+    conversation_context = ""
+    if conversation:
+        conversation_parts = []
+        for msg in conversation:
+            if isinstance(msg, dict):
+                role = msg.get("role", "unknown")
+                content = msg.get("content", "")
+            elif hasattr(msg, 'type'):  # AIMessage or HumanMessage
+                role = "assistant" if msg.type == "ai" else "user"
+                content = msg.content if hasattr(msg, 'content') else str(msg)
+            elif hasattr(msg, 'content'):  # Generic message object
+                role = "assistant"  # Default to assistant if we can't determine
+                content = msg.content
+            else:
+                continue  # Skip unknown message types
+            
+            conversation_parts.append(f"{role}: {content}")
+        conversation_context = "\n".join(conversation_parts[-6:])  # Last 6 messages for context
+    
+    # Create enhanced prompt with conversation context
+    if conversation_context:
+        # Add conversation context to the template
+        enhanced_template = f"""{topic_filter_template}
+
+**IMPORTANT**: Consider the conversation context below. Follow-up questions, clarifications, or refinements to previous parcel queries are still relevant, even if they seem vague on their own.
+
+Conversation context:
+{conversation_context}
+"""
+        prompt = ChatPromptTemplate.from_messages(
+            [("system", enhanced_template), ("human", "{{user_query}}")]
+        )
+    else:
+        # No conversation context, use original template
+        prompt = ChatPromptTemplate.from_messages(
+            [("system", topic_filter_template), ("human", "{{user_query}}")]
+        )
+    
     chain = prompt | llm | JsonOutputParser()
     data = chain.invoke({"user_query": user_query})
     
@@ -204,12 +245,32 @@ def contextual_query_understanding(state: SQLState):
     conversation = state.get("conversation", [])
     user_query = state.get("user_query", "")
     
+    # Convert conversation messages to dicts if they're AIMessage objects
+    conversation_str = ""
+    if conversation:
+        conversation_parts = []
+        for msg in conversation:
+            if isinstance(msg, dict):
+                role = msg.get("role", "unknown")
+                content = msg.get("content", "")
+            elif hasattr(msg, 'type'):  # AIMessage or HumanMessage
+                role = "assistant" if msg.type == "ai" else "user"
+                content = msg.content if hasattr(msg, 'content') else str(msg)
+            elif hasattr(msg, 'content'):  # Generic message object with content
+                role = "assistant"  # Default to assistant if we can't determine
+                content = msg.content
+            else:
+                role = "unknown"
+                content = str(msg)
+            conversation_parts.append(f"{role}: {content}")
+        conversation_str = "\n".join(conversation_parts)
+    
     prompt = f"""
     You are a helpful assistant that interprets user questions about a parcel database.
     Use the prior conversation to make the current query self-contained.
 
     Conversation so far:
-    {conversation}
+    {conversation_str}
 
     Latest query:
     {user_query}
@@ -232,45 +293,103 @@ def resolve_vague_conditions(state: SQLState):
     Attempt to infer reasonable replacements using schema + geography context.
     Ask user to confirm or refine.
     """
-
-    prompt = """
-    The user provided the following query:
-
-    "{user_query}"
-
-    Identify any vague or underspecified conditions (e.g., "Western Massachusetts", "large parcels", "near a substation").
-    For each vague condition:
-      1. Propose the most likely concrete interpretation based on the schema and common domain sense.
-      2. Return your best guess in the form of a structured list of suggested replacements.
-
-    Schema information:
-    {schema}
-
-    Respond ONLY as JSON in this format:
-    {{
+    user_query = state.get("user_query", "")
+    
+    prompt_template_str = """
+    Analyze the following user query and identify any vague or underspecified conditions.
+    
+    **CRITICAL**: You must analyze the ACTUAL user query provided below: "{user_query}"
+    Do NOT use example values. Only return vague conditions that actually exist in THIS user query.
+    
+    For each vague condition you find in the ACTUAL user query above:
+      1. Identify the exact vague phrase from the user's query
+      2. Propose the most likely concrete interpretation based on the schema and common domain sense
+      3. Return your interpretation in the JSON format below
+    
+    Examples of vague conditions (for reference only - DO NOT use these, analyze the actual user query):
+    - "Western Massachusetts" → could mean specific counties
+    - "large parcels" → could mean parcels above a certain acreage threshold
+    - "near a substation" → could mean within a certain distance (e.g., 2km)
+    
+    Schema information: {SCHEMA_TEXT}
+    
+    Respond ONLY as JSON in this format (only include vague conditions that actually exist in the user query):
+    {{{{
       "vague_conditions": [
-        {{
-          "original": "Western Massachusetts",
-          "suggested_replacement": "counties IN ('BERKSHIRE', 'FRANKLIN', 'HAMPSHIRE', 'HAMPDEN')",
-          "reasoning": "These are the four westernmost counties in MA"
-        }}
+        {{{{
+          "original": "<exact vague phrase from user query>",
+          "suggested_replacement": "<concrete interpretation>",
+          "reasoning": "<why you chose this interpretation>"
+        }}}}
       ]
-    }}
+    }}}}
+    
+    If there are NO vague conditions in the user query, return:
+    {{{{
+      "vague_conditions": []
+    }}}}
     """
 
-    response = llm.invoke(prompt).content.strip()
-
-    # Try to parse JSON safely
-    import json
+    # Use ChatPromptTemplate for better prompt handling
+    from langchain_core.prompts import ChatPromptTemplate
+    from langchain_core.output_parsers import JsonOutputParser
+    
+    prompt_template = ChatPromptTemplate.from_messages([
+        ("system", "You are a SQL query analyzer. Analyze the ACTUAL user query for vague conditions. Do NOT use example values - only analyze the real user query provided."),
+        ("human", prompt_template_str)
+    ])
+    
+    parser = JsonOutputParser()
+    chain = prompt_template | llm | parser
+    
     try:
-        data = json.loads(response)
-        vague_conditions = data.get("vague_conditions", [])
-    except Exception:
-        vague_conditions = []
+        result = chain.invoke({"SCHEMA_TEXT": SCHEMA_TEXT, "user_query": user_query})
+        # JsonOutputParser should return a dict, but check if it's an AIMessage
+        if hasattr(result, 'content'):
+            # It's an AIMessage, parse the content
+            import json
+            data = json.loads(result.content)
+        elif isinstance(result, dict):
+            # It's already a dict
+            data = result
+        else:
+            # Try to convert to dict
+            data = dict(result) if hasattr(result, '__dict__') else {}
+        vague_conditions = data.get("vague_conditions", []) if isinstance(data, dict) else []
+    except Exception as e:
+        print(f"Error parsing vague conditions with JsonOutputParser: {e}")
+        import traceback
+        traceback.print_exc()
+        # Fallback: try direct LLM call with manual JSON parsing
+        try:
+            # Format the prompt with actual values
+            formatted_prompt = prompt_template_str.format(SCHEMA_TEXT=SCHEMA_TEXT, user_query=user_query)
+            response = llm.invoke(formatted_prompt)
+            # Extract content if it's an AIMessage
+            if hasattr(response, 'content'):
+                response_text = response.content.strip()
+            else:
+                response_text = str(response).strip()
+            import json
+            # Try to extract JSON from markdown if present
+            if "```json" in response_text:
+                response_text = response_text.split("```json")[1].split("```")[0].strip()
+            elif "```" in response_text:
+                response_text = response_text.split("```")[1].split("```")[0].strip()
+            data = json.loads(response_text)
+            vague_conditions = data.get("vague_conditions", []) if isinstance(data, dict) else []
+        except Exception as e2:
+            print(f"Error in fallback parsing: {e2}")
+            import traceback
+            traceback.print_exc()
+            vague_conditions = []
 
     if not vague_conditions:
         # No vague items detected → proceed directly
-        return {"conversation": [{"role": "assistant", "content": "No vague conditions detected."}]}
+        return {
+            "conversation": [],
+            "vague_conditions": []
+        }
 
     # Build a confirmation message for user
     message_lines = ["I noticed a few vague parts of your query:"]
@@ -279,7 +398,7 @@ def resolve_vague_conditions(state: SQLState):
             f"- \"{cond['original']}\" → I interpreted as: {cond['suggested_replacement']}"
         )
     message_lines.append(
-        "\nIs this what you had in mind? You can confirm or clarify any of these."
+        "\nPlease confirm if this interpretation is correct, or provide more specific criteria."
     )
     clarification_message = "\n".join(message_lines)
 
@@ -287,7 +406,6 @@ def resolve_vague_conditions(state: SQLState):
         "conversation": [
             {"role": "assistant", "content": clarification_message}
         ],
-        # Optionally store for later refinement
         "vague_conditions": vague_conditions,
     }
 
@@ -411,15 +529,78 @@ def display_results(state: SQLState):
     error = state.get("error")
     results = state.get("results")
     conversation = state.get("conversation", [])
+    vague_conditions = state.get("vague_conditions", [])
+    topic_filter_message = state.get("topic_filter_message")
+    
+    # If topic filter failed, add the error message
+    if topic_filter_message:
+        # Check if message is already in conversation (handle both dict and AIMessage)
+        message_exists = False
+        if conversation:
+            last_msg = conversation[-1]
+            if isinstance(last_msg, dict):
+                last_content = last_msg.get("content", "")
+            elif hasattr(last_msg, 'content'):
+                last_content = last_msg.content
+            else:
+                last_content = str(last_msg)
+            message_exists = (last_content == topic_filter_message)
+        
+        if not message_exists:
+            conversation.append({"role": "assistant", "content": topic_filter_message})
+    
+    # If vague conditions were detected, the message is already in conversation from resolve_vague_conditions
+    # Just ensure it's there
+    if vague_conditions and len(vague_conditions) > 0:
+        # Check if the vague conditions message is already in conversation
+        # Handle both dict and AIMessage objects
+        vague_message_exists = False
+        for msg in conversation:
+            if isinstance(msg, dict):
+                content = msg.get("content", "")
+            elif hasattr(msg, 'content'):
+                content = msg.content
+            else:
+                content = str(msg)
+            if "vague parts of your query" in content:
+                vague_message_exists = True
+                break
+        if not vague_message_exists:
+            # Build the message (should already be there, but just in case)
+            message_lines = ["I noticed a few vague parts of your query:"]
+            for cond in vague_conditions:
+                message_lines.append(
+                    f"- \"{cond['original']}\" → I interpreted as: {cond['suggested_replacement']}"
+                )
+            message_lines.append(
+                "\nPlease confirm if this interpretation is correct, or provide more specific criteria."
+            )
+            clarification_message = "\n".join(message_lines)
+            conversation.append({"role": "assistant", "content": clarification_message})
     
     # If there's an error and it's not already in conversation, add it
-    if error and (not conversation or conversation[-1].get("content") != error):
-        conversation.append({"role": "assistant", "content": error})
+    if error:
+        # Check if error is already in conversation (handle both dict and AIMessage)
+        error_exists = False
+        if conversation:
+            last_msg = conversation[-1]
+            if isinstance(last_msg, dict):
+                last_content = last_msg.get("content", "")
+            elif hasattr(last_msg, 'content'):
+                last_content = last_msg.content
+            else:
+                last_content = str(last_msg)
+            error_exists = (last_content == error)
+        
+        if not error_exists:
+            conversation.append({"role": "assistant", "content": error})
     
     if error:
         print("❌ Query failed:", error)
     elif results:
         print(f"✅ Returned {len(results)} results")
+    elif vague_conditions:
+        print(f"⚠️ Vague conditions detected: {len(vague_conditions)}")
     else:
         print("No results found.")
     
@@ -429,8 +610,8 @@ def display_results(state: SQLState):
 # --- GRAPH CONSTRUCTION ---
 graph = StateGraph(SQLState)
 
-# graph.add_node("resolve_vague_conditions", resolve_vague_conditions)
 graph.add_node("topic_filter", topic_filter)
+graph.add_node("resolve_vague_conditions", resolve_vague_conditions)
 graph.add_node("contextual_query_understanding", contextual_query_understanding)
 graph.add_node("generate_sql", generate_sql)
 graph.add_node("execute_sql", execute_sql)
@@ -447,6 +628,7 @@ def route_after_topic_filter(state: SQLState):
     # Also check the boolean flag
     if state.get("relevant_query_topic") is False:
         return "display_results"
+    # If topic is relevant, go to contextual_query_understanding first
     return "contextual_query_understanding"
 
 graph.add_conditional_edges(
@@ -458,7 +640,29 @@ graph.add_conditional_edges(
     }
 )
 
-graph.add_edge("contextual_query_understanding", "generate_sql")
+# Direct edge: contextual_query_understanding → resolve_vague_conditions
+graph.add_edge("contextual_query_understanding", "resolve_vague_conditions")
+
+# Conditional routing after resolve_vague_conditions
+def route_after_vague_conditions(state: SQLState):
+    """Route after vague conditions: continue if none detected, ask user if detected."""
+    vague_conditions = state.get("vague_conditions", [])
+    
+    # If vague conditions were detected, show them to the user and wait for confirmation
+    if vague_conditions and len(vague_conditions) > 0:
+        return "display_results"
+    
+    # No vague conditions detected, proceed to generate_sql
+    return "generate_sql"
+
+graph.add_conditional_edges(
+    "resolve_vague_conditions",
+    route_after_vague_conditions,
+    {
+        "generate_sql": "generate_sql",
+        "display_results": "display_results"
+    }
+)
 graph.add_edge("generate_sql", "execute_sql")
 graph.add_edge("execute_sql", "validate_sql")
 
@@ -496,7 +700,7 @@ if __name__ == "__main__":
     from langchain_core.runnables import RunnableConfig
     
     state = {
-        "user_query": "Find me all sites in Franklin county that are more than 20 acres.",
+        "user_query": "Find me all sites in Franklin county that are more than 20 acres and are not close to wetlands.",
         "expanded_query": None,
         "sql_query": None,
         "results": None,
@@ -507,6 +711,8 @@ if __name__ == "__main__":
     }
     config = RunnableConfig(configurable={"thread_id": "test-thread"})
     result = app.invoke(state, config=config)
+
+    vc = resolve_vague_conditions(result)
     # print(result)
 
     # state = {
