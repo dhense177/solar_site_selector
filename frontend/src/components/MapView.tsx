@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { MapContainer, TileLayer, Polygon, Popup, useMap } from "react-leaflet";
 import { LatLngExpression, LatLngBounds, LatLngTuple } from "leaflet";
 import L from "leaflet";
@@ -76,6 +76,42 @@ function geoJsonToLeaflet(coordinates: number[][][] | number[][][][]): LatLngExp
   }
   
   return [];
+}
+
+// Component to update tile layer when map type changes
+function TileLayerUpdater({ mapType }: { mapType: "map" | "satellite" }) {
+  const map = useMap();
+  const tileLayerRef = useRef<L.TileLayer | null>(null);
+  
+  useEffect(() => {
+    // Get current view state before changing tiles (preserve zoom and center)
+    const currentCenter = map.getCenter();
+    const currentZoom = map.getZoom();
+    
+    // Remove existing tile layer if it exists
+    if (tileLayerRef.current) {
+      map.removeLayer(tileLayerRef.current);
+    }
+    
+    // Add new tile layer based on map type
+    const newTileLayer = mapType === "map" 
+      ? L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        })
+      : L.tileLayer("https://tiles.arcgis.com/tiles/hGdibHYSPO59RG1h/arcgis/rest/services/orthos2023/MapServer/tile/{z}/{y}/{x}", {
+          attribution: '&copy; <a href="https://www.mass.gov/massgis">MassGIS</a>',
+          maxZoom: 20,
+          minZoom: 7
+        });
+    
+    newTileLayer.addTo(map);
+    tileLayerRef.current = newTileLayer;
+    
+    // Restore previous view (preserve zoom and center)
+    map.setView(currentCenter, currentZoom, { animate: false });
+  }, [map, mapType]);
+  
+  return null;
 }
 
 // Component to handle map view updates when parcels change
@@ -279,24 +315,12 @@ const MapView = ({ parcels, selectedParcel }: MapViewProps) => {
         style={{ height: "100%", width: "100%", minHeight: "400px", zIndex: 0 }}
         scrollWheelZoom={true}
         zoomControl={true}
-        key={mapType} // Force remount when map type changes
         whenReady={() => {
           console.log("Map container is ready, parcels:", parcels.length);
         }}
       >
-        {mapType === "map" ? (
-          <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          />
-        ) : (
-          <TileLayer
-            attribution='&copy; <a href="https://www.mass.gov/massgis">MassGIS</a>'
-            url="https://tiles.arcgis.com/tiles/hGdibHYSPO59RG1h/arcgis/rest/services/orthos2023/MapServer/tile/{z}/{y}/{x}"
-            maxZoom={20}
-            minZoom={7}
-          />
-        )}
+        {/* Component to manage tile layer (handles initial render and updates) */}
+        <TileLayerUpdater mapType={mapType} />
         
         <MapUpdater parcels={parcels} selectedParcel={selectedParcel} />
         
