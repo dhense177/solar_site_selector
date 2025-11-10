@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import OnboardingModal from "@/components/OnboardingModal";
+import AvailableFeaturesModal from "@/components/AvailableFeaturesModal";
 import ChatInterface from "@/components/ChatInterface";
 import MapView from "@/components/MapView";
 import { HelpCircle } from "lucide-react";
@@ -23,6 +24,7 @@ interface Parcel {
 
 const Index = () => {
   const [showOnboarding, setShowOnboarding] = useState(true);
+  const [showAvailableFeatures, setShowAvailableFeatures] = useState(false);
   const [parcels, setParcels] = useState<Parcel[]>([]);
   const [selectedParcel, setSelectedParcel] = useState<Parcel | null>(null);
 
@@ -68,15 +70,25 @@ const Index = () => {
             <h1 className="text-2xl font-bold absolute left-1/2 transform -translate-x-1/2" style={{ color: '#FFB300', fontFamily: 'Helvetica, sans-serif' }}>
               Massachusetts Utility-Scale Solar Site Selection Assistant
             </h1>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setShowOnboarding(true)}
-              className="gap-2"
-            >
-              <HelpCircle className="w-4 h-4" />
-              Help
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowAvailableFeatures(true)}
+                className="gap-2"
+              >
+                Available Features
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowOnboarding(true)}
+                className="gap-2"
+              >
+                <HelpCircle className="w-4 h-4" />
+                Help
+              </Button>
+            </div>
           </div>
         </div>
       </header>
@@ -100,6 +112,9 @@ const Index = () => {
 
       {/* Onboarding Modal */}
       <OnboardingModal isOpen={showOnboarding} onClose={handleCloseOnboarding} />
+      
+      {/* Available Features Modal */}
+      <AvailableFeaturesModal isOpen={showAvailableFeatures} onClose={() => setShowAvailableFeatures(false)} />
     </div>
   );
 };
