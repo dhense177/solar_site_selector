@@ -296,20 +296,37 @@ def resolve_vague_conditions(state: SQLState):
     user_query = state.get("user_query", "")
     
     prompt_template_str = """
-    Analyze the following user query and identify any vague or underspecified conditions.
+    Analyze the following user query and identify ONLY truly vague or underspecified conditions.
     
-    **CRITICAL**: You must analyze the ACTUAL user query provided below: "{user_query}"
-    Do NOT use example values. Only return vague conditions that actually exist in THIS user query.
+    **CRITICAL RULES**:
+    1. You must analyze the ACTUAL user query provided below: "{user_query}"
+    2. Do NOT use example values. Only return vague conditions that actually exist in THIS user query.
+    3. ONLY flag conditions that are genuinely vague - conditions with specific values (numbers, distances, feature types) are NOT vague.
     
-    For each vague condition you find in the ACTUAL user query above:
-      1. Identify the exact vague phrase from the user's query
-      2. Propose the most likely concrete interpretation based on the schema and common domain sense
-      3. Return your interpretation in the JSON format below
+    **What IS vague (flag these)**:
+    - Geographic regions without specifics: "Western Massachusetts", "the coast", "rural areas"
+    - Size descriptors without numbers: "large parcels", "small sites", "big enough"
+    - Distance without specifics: "near", "close to", "far from" (without distance)
+    - Time periods without specifics: "recent", "old", "new"
+    - Ambiguous feature types: "infrastructure" (without specifying what type)
+    
+    **What is NOT vague (do NOT flag these)**:
+    - Specific distances: "within 1 mile", "2km away", "500 meters"
+    - Specific sizes: "over 20 acres", "at least 30 acres", "between 10 and 50 acres"
+    - Specific feature types: "substations", "transmission lines", "wetlands"
+    - Specific counties/towns: "Worcester county", "Boston", "Franklin county"
+    - Specific values: "above $100,000", "capacity > 5MW"
+    - Combinations of specific values: "within 1 mile of substations" (has distance AND feature type)
     
     Examples of vague conditions (for reference only - DO NOT use these, analyze the actual user query):
-    - "Western Massachusetts" → could mean specific counties
-    - "large parcels" → could mean parcels above a certain acreage threshold
-    - "near a substation" → could mean within a certain distance (e.g., 2km)
+    - "Western Massachusetts" → vague (no specific counties)
+    - "large parcels" → vague (no specific acreage)
+    - "near a substation" → vague (no specific distance)
+    
+    Examples of CLEAR conditions (do NOT flag these):
+    - "Within 1 mile of substations" → CLEAR (has distance and feature type)
+    - "Parcels over 20 acres" → CLEAR (has specific size)
+    - "In Worcester county" → CLEAR (has specific location)
     
     Schema information: {SCHEMA_TEXT}
     
