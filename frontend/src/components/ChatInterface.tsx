@@ -30,10 +30,10 @@ interface ChatInterfaceProps {
 }
 
 const SUGGESTED_PROMPTS = [
-  "Find parcels over 20 acres in Franklin county away from wetlands",
-  "Show flat land parcels over 15 acres in Worcester county",
-  "Find parcels with southern exposure in Berkshire county",
-  "Search for 25+ acre parcels near grid infrastructure in Hampshire county"
+  "Find parcels with at least 50 MW of ground-mount capacity in Worcester county",
+  "Find me 20+ acre sites within industrial zones in Franklin County",
+  "Search for 25+ acre parcels within 1 km of a substation in Pittsfield, MA",
+  "Find parcels over 30 acres in Franklin county that are at least 2km from any wetlands or flood zones"
 ];
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
