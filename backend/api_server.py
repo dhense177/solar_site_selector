@@ -263,6 +263,9 @@ async def search_parcels(request: QueryRequest):
         results = final_state.get('results')
         error = final_state.get('error')
         vague_conditions = final_state.get('vague_conditions', [])
+        unmatched_warning = final_state.get('unmatched_conditions_warning')
+        user_query = final_state.get('user_query', '')
+        expanded_query = final_state.get('expanded_query', '')
         
         # Check if vague conditions were detected - if so, return the clarification message
         if vague_conditions and len(vague_conditions) > 0:
@@ -307,7 +310,7 @@ async def search_parcels(request: QueryRequest):
         if results is None:
             results = []
         
-        # Extract explanation from conversation
+        # Extract explanation from conversation (skip unmatched warnings)
         explanation = ""
         conversation = final_state.get('conversation', [])
         if conversation:
@@ -326,8 +329,17 @@ async def search_parcels(request: QueryRequest):
                     continue  # Skip unknown message types
                 
                 if role == 'assistant' and content:
-                    explanation = content
-                    break
+                    # Skip unmatched condition warnings (they'll be added separately)
+                    # Skip messages that are just the user's query or expanded query
+                    if "not available in the database" not in content:
+                        # Skip if this looks like it's just repeating the user's query
+                        user_query = final_state.get('user_query', '')
+                        expanded_query = final_state.get('expanded_query', '')
+                        if content != user_query and content != expanded_query:
+                            # Only use explanation if it's not just the query
+                            if not content.startswith(user_query) and not content.startswith(expanded_query):
+                                explanation = content
+                                break
         
         # Convert all geometries to GeoJSON and transform to parcels
         parcels = []
@@ -345,15 +357,28 @@ async def search_parcels(request: QueryRequest):
             if parcel:
                 parcels.append(parcel)
         
-        # Generate summary
+        # Generate summary (don't include explanation if it's just the user's query)
         if parcels:
             summary = f"Found {len(parcels)} parcel{'s' if len(parcels) != 1 else ''} matching your criteria."
-            if explanation:
-                summary += f" {explanation}"
+            # Only add explanation if it's not just the user's query
+            if explanation and explanation != user_query and explanation != expanded_query:
+                # Also check if explanation starts with the query
+                if not explanation.startswith(user_query) and not explanation.startswith(expanded_query):
+                    summary += f" {explanation}"
         else:
             summary = "No parcels found matching your criteria."
-            if explanation:
-                summary += f" {explanation}"
+            # Only add explanation if it's not just the user's query
+            if explanation and explanation != user_query and explanation != expanded_query:
+                # Also check if explanation starts with the query
+                if not explanation.startswith(user_query) and not explanation.startswith(expanded_query):
+                    summary += f" {explanation}"
+        
+        # Include unmatched conditions warning in summary if present
+        if unmatched_warning:
+            if summary:
+                summary = f"{summary}\n\n{unmatched_warning}"
+            else:
+                summary = unmatched_warning
         
         return SearchResponse(
             parcels=parcels,

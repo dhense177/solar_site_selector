@@ -127,6 +127,9 @@ class SQLState(TypedDict):
     
     # Vague conditions tracking
     vague_conditions: Optional[List[Dict[str, str]]]  # List of vague conditions detected
+    
+    # Unmatched conditions tracking
+    unmatched_conditions_warning: Optional[str]  # Warning message if conditions don't match database
 
     # Persistent multi-turn memory
     conversation: Annotated[List[Dict[str, str]], add_messages]
@@ -462,11 +465,105 @@ def execute_sql(state: SQLState):
     
     return {"results": rows, "error": error}
 
+def check_unmatched_conditions(state: SQLState):
+    """
+    Check if user's filtering conditions match what's available in the database.
+    Warn user if they requested features that don't exist in the database.
+    """
+    user_query = state.get("user_query", "")
+    expanded_query = state.get("expanded_query", "")
+    sql_query = state.get("sql_query", "")
+    results = state.get("results", [])
+    
+    check_prompt = f"""
+    Analyze the user's query and identify any filtering conditions that request features NOT available in the database.
+    
+    User's original query: "{user_query}"
+    Expanded query: "{expanded_query}"
+    SQL query: "{sql_query}"
+    
+    Database schema (this shows all available features and their class values):
+    {SCHEMA_TEXT}
+    
+    **IMPORTANT RULES**:
+    1. Use the database schema above to determine what features are available. Look at the column comments which describe the available class values (e.g., "substation" or "power_line" for infrastructure, "wetland" or "forest" for land_cover, etc.).
+    2. If the user asks for features that are semantically similar to available features (e.g., "power stations" → "substation", "power lines" → "power_line"), these are MATCHED and should NOT be flagged.
+    3. Only flag features that have NO equivalent in the database schema (e.g., "hospitals", "schools", "buildings" when referring to specific building types that are not in the schema).
+    4. If the user asks to exclude features that don't exist (e.g., "without hospitals"), this should be flagged as a warning.
+    5. If results are empty or very few, and the user requested features that don't exist in the schema, this is likely the cause.
+    
+    **CRITICAL**: Keep all responses SHORT and SIMPLE. Do NOT mention database table names, column names, or any technical details. Just identify the requested feature name. The "reason" and "suggestion" fields will be ignored - only use "requested_feature".
+    
+    Respond ONLY as JSON in this format:
+    {{{{
+      "unmatched_conditions": [
+        {{{{
+          "requested_feature": "<exact feature requested by user - just the feature name>"
+        }}}}
+      ],
+      "has_unmatched": true/false
+    }}}}
+    
+    If all requested features match available features, return:
+    {{{{
+      "unmatched_conditions": [],
+      "has_unmatched": false
+    }}}}
+    """
+    
+    from langchain_core.prompts import ChatPromptTemplate
+    from langchain_core.output_parsers import JsonOutputParser
+    
+    prompt_template = ChatPromptTemplate.from_messages([
+        ("system", "You are a database schema analyzer. Check if user-requested features match what's available in the database. Only flag features that have NO equivalent in the database. Keep all responses SHORT and SIMPLE - no table names, no technical details."),
+        ("human", check_prompt)
+    ])
+    
+    parser = JsonOutputParser()
+    chain = prompt_template | llm | parser
+    
+    try:
+        result = chain.invoke({})
+        # Handle both dict and AIMessage
+        if hasattr(result, 'content'):
+            import json
+            data = json.loads(result.content)
+        elif isinstance(result, dict):
+            data = result
+        else:
+            data = dict(result) if hasattr(result, '__dict__') else {}
+        
+        has_unmatched = data.get("has_unmatched", False) if isinstance(data, dict) else False
+        unmatched_conditions = data.get("unmatched_conditions", []) if isinstance(data, dict) else []
+        
+        if has_unmatched and unmatched_conditions:
+            # Build short, simple warning message
+            features = [cond['requested_feature'] for cond in unmatched_conditions]
+            if len(features) == 1:
+                warning_message = f"⚠️ Note: \"{features[0]}\" is not available in the database."
+            else:
+                features_str = ", ".join([f'"{f}"' for f in features[:-1]]) + f', and "{features[-1]}"'
+                warning_message = f"⚠️ Note: {features_str} are not available in the database."
+            
+            return {
+                "unmatched_conditions_warning": warning_message
+            }
+        
+        return {"unmatched_conditions_warning": None}
+        
+    except Exception as e:
+        print(f"Error checking unmatched conditions: {e}")
+        import traceback
+        traceback.print_exc()
+        # Don't fail the query if this check fails
+        return {"unmatched_conditions_warning": None}
+
 def validate_sql(state: SQLState):
     """
     Validate SQL before accepting results:
     - Check syntax via EXPLAIN
     - Check non-empty results
+    - Check for unmatched conditions (features requested that don't exist in DB)
     - Use LLM to confirm the results make sense
     """
     sql_query = state.get("sql_query", "")
@@ -479,11 +576,28 @@ def validate_sql(state: SQLState):
     # except Exception as e:
     #     return {"error": f"SQL syntax error: {e}", "last_failed_sql": sql_query}
 
-    # 2️⃣ Check for empty results
+    # 2️⃣ Check for unmatched conditions (features requested that don't exist in DB)
+    unmatched_check = check_unmatched_conditions(state)
+    unmatched_warning = unmatched_check.get("unmatched_conditions_warning")
+
+    # 3️⃣ Check for empty results
     if not results or len(results) == 0:
+        # If there are unmatched conditions, include that in the error message
+        if unmatched_warning:
+            return {
+                "error": f"Query executed successfully but returned 0 results. {unmatched_warning}",
+                "last_failed_sql": sql_query,
+                "unmatched_conditions_warning": unmatched_warning,
+            }
         return {
             "error": "Query executed successfully but returned 0 results.",
             "last_failed_sql": sql_query,
+        }
+    
+    # If we have results but unmatched conditions, include warning
+    if unmatched_warning:
+        return {
+            "unmatched_conditions_warning": unmatched_warning
         }
 
     # # 3️⃣ Validate alignment with user intent
@@ -548,6 +662,7 @@ def display_results(state: SQLState):
     conversation = state.get("conversation", [])
     vague_conditions = state.get("vague_conditions", [])
     topic_filter_message = state.get("topic_filter_message")
+    unmatched_warning = state.get("unmatched_conditions_warning")
     
     # If topic filter failed, add the error message
     if topic_filter_message:
@@ -612,10 +727,15 @@ def display_results(state: SQLState):
         if not error_exists:
             conversation.append({"role": "assistant", "content": error})
     
+    # Don't add unmatched conditions warning to conversation - it will be added to summary in api_server.py
+    # This prevents duplication
+    
     if error:
         print("❌ Query failed:", error)
     elif results:
         print(f"✅ Returned {len(results)} results")
+        if unmatched_warning:
+            print(f"⚠️ Unmatched conditions warning: {unmatched_warning[:100]}...")
     elif vague_conditions:
         print(f"⚠️ Vague conditions detected: {len(vague_conditions)}")
     else:
