@@ -309,3 +309,14 @@ if __name__ == "__main__":
 # q2['attempt'] = 0
 # Use the same thread_id to maintain conversation state
 # results_dict = invoke_app(q2, thread_id="test-session-1")
+
+
+#####
+# Main queries
+# "Find parcels over 30 acres in Franklin county that are at least 2km from any wetlands or flood zones"
+
+# "Search for 25+ acre parcels within 1 km of substations in Pittsfield, MA"
+
+# "Find parcels with at least 50 MW of ground-mount capacity in Worcester county"
+
+# "Find me 20+ acre sites within industrial zones in Franklin County"
