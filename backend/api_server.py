@@ -3,6 +3,7 @@ FastAPI server for integrating sql_agent.py with the frontend
 """
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import os
@@ -12,6 +13,7 @@ from shapely.geometry import mapping as shapely_mapping
 from geoalchemy2.shape import to_shape
 import json
 import uuid
+import asyncio
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 
 # Initialize FastAPI app
@@ -230,171 +232,215 @@ async def search_parcels_options():
         }
     )
 
-@api_app.post("/api/search", response_model=SearchResponse)
-async def search_parcels(request: QueryRequest):
-    """Search for parcels using natural language query"""
-    print(f"Received POST request to /api/search with query: {request.query}")
-    try:
-        session_id = request.session_id or str(uuid.uuid4())
-        config = RunnableConfig(configurable={"thread_id": session_id})
-        
-        # Build state matching SQLState TypedDict
-        state = {
-            "user_query": request.query,
-            "expanded_query": None,
-            "sql_query": None,
-            "results": None,
-            "error": None,
-            "last_failed_sql": None,
-            "attempt": 0,
-            "conversation": []
-        }
-        
-        # Invoke SQL agent with timeout
+# Map node names to user-friendly step names
+STEP_NAMES = {
+    "topic_filter": "Checking topic relevance",
+    "contextual_query_understanding": "Constructing contextual query",
+    "resolve_vague_conditions": "Resolving vague conditions",
+    "generate_sql": "Generating SQL query",
+    "execute_sql": "Executing query",
+    "validate_sql": "Validating results",
+    "repair_sql": "Repairing SQL query",
+    "display_results": "Finalizing results"
+}
+
+async def stream_search_parcels(request: QueryRequest):
+    """Stream search for parcels with real-time status updates"""
+    session_id = request.session_id or str(uuid.uuid4())
+    config = RunnableConfig(configurable={"thread_id": session_id})
+    
+    # Build state matching SQLState TypedDict
+    state = {
+        "user_query": request.query,
+        "expanded_query": None,
+        "sql_query": None,
+        "results": None,
+        "error": None,
+        "last_failed_sql": None,
+        "attempt": 0,
+        "conversation": []
+    }
+    
+    async def generate():
         try:
-            with ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(sql_agent_app.invoke, state, config)
-                final_state = future.result(timeout=60)
-        except FuturesTimeoutError:
-            raise HTTPException(status_code=504, detail="Query timed out after 60 seconds")
-        
-        # Extract results
-        sql_query = final_state.get('sql_query')
-        results = final_state.get('results')
-        error = final_state.get('error')
-        vague_conditions = final_state.get('vague_conditions', [])
-        unmatched_warning = final_state.get('unmatched_conditions_warning')
-        user_query = final_state.get('user_query', '')
-        expanded_query = final_state.get('expanded_query', '')
-        
-        # Check if vague conditions were detected - if so, return the clarification message
-        if vague_conditions and len(vague_conditions) > 0:
-            # Extract the vague conditions message from conversation
+            # Stream the graph execution
+            final_state = None
+            # Use astream_events for better streaming support
+            try:
+                async for event in sql_agent_app.astream_events(state, config, version="v2"):
+                    # Check if this is a node start event
+                    if event.get("event") == "on_chain_start" and "name" in event:
+                        node_name = event.get("name", "")
+                        if node_name in STEP_NAMES:
+                            step_name = STEP_NAMES[node_name]
+                            # Send status update
+                            yield f"data: {json.dumps({'type': 'status', 'step': step_name, 'node': node_name})}\n\n"
+                            await asyncio.sleep(0.05)  # Small delay for UI updates
+                    
+                    # Collect final state from events
+                    if event.get("event") == "on_chain_end" and "data" in event:
+                        event_data = event.get("data", {})
+                        if isinstance(event_data, dict):
+                            if final_state is None:
+                                final_state = {}
+                            final_state.update(event_data.get("output", {}))
+            except Exception as stream_error:
+                # Fallback to regular stream if astream_events doesn't work
+                print(f"astream_events failed, trying astream: {stream_error}")
+                async for chunk in sql_agent_app.astream(state, config):
+                    # chunk is a dict with node names as keys
+                    for node_name, node_output in chunk.items():
+                        if node_name in STEP_NAMES:
+                            step_name = STEP_NAMES[node_name]
+                            # Send status update
+                            yield f"data: {json.dumps({'type': 'status', 'step': step_name, 'node': node_name})}\n\n"
+                            await asyncio.sleep(0.05)  # Small delay for UI updates
+                    
+                    # Update final_state with latest chunk
+                    if chunk:
+                        # Merge all node outputs into final_state
+                        for node_name, node_output in chunk.items():
+                            if isinstance(node_output, dict):
+                                if final_state is None:
+                                    final_state = {}
+                                final_state.update(node_output)
+            
+            # After streaming is complete, get final state
+            # If we didn't collect enough state from streaming, invoke once more to get final state
+            if final_state is None or not final_state.get('results'):
+                # Fallback: invoke synchronously to get final state
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(sql_agent_app.invoke, state, config)
+                    final_state = future.result(timeout=60)
+            
+            # Process final state and send results
+            sql_query = final_state.get('sql_query')
+            results = final_state.get('results')
+            error = final_state.get('error')
+            vague_conditions = final_state.get('vague_conditions', [])
+            unmatched_warning = final_state.get('unmatched_conditions_warning')
+            user_query = final_state.get('user_query', '')
+            expanded_query = final_state.get('expanded_query', '')
+            
+            # Check if vague conditions were detected
+            if vague_conditions and len(vague_conditions) > 0:
+                explanation = ""
+                conversation = final_state.get('conversation', [])
+                if conversation:
+                    for msg in reversed(conversation):
+                        if isinstance(msg, dict):
+                            role = msg.get('role', '')
+                            content = msg.get('content', '')
+                        elif hasattr(msg, 'type'):
+                            role = "assistant" if msg.type == "ai" else "user"
+                            content = msg.content if hasattr(msg, 'content') else str(msg)
+                        elif hasattr(msg, 'content'):
+                            role = "assistant"
+                            content = msg.content
+                        else:
+                            continue
+                        
+                        if role == 'assistant' and content:
+                            explanation = content
+                            break
+                
+                yield f"data: {json.dumps({'type': 'result', 'parcels': [], 'summary': explanation or 'Please clarify vague conditions in your query.', 'sql': None, 'session_id': session_id})}\n\n"
+                return
+            
+            if error:
+                yield f"data: {json.dumps({'type': 'result', 'parcels': [], 'summary': f'Error: {error}', 'sql': sql_query, 'session_id': session_id})}\n\n"
+                return
+            
+            # Ensure results is a list
+            if results is None:
+                results = []
+            
+            # Extract explanation from conversation
             explanation = ""
             conversation = final_state.get('conversation', [])
             if conversation:
                 for msg in reversed(conversation):
-                    # Handle both dict and AIMessage objects
                     if isinstance(msg, dict):
                         role = msg.get('role', '')
                         content = msg.get('content', '')
-                    elif hasattr(msg, 'type'):  # AIMessage or HumanMessage
+                    elif hasattr(msg, 'type'):
                         role = "assistant" if msg.type == "ai" else "user"
                         content = msg.content if hasattr(msg, 'content') else str(msg)
-                    elif hasattr(msg, 'content'):  # Generic message object
-                        role = "assistant"  # Default to assistant if we can't determine
+                    elif hasattr(msg, 'content'):
+                        role = "assistant"
                         content = msg.content
                     else:
-                        continue  # Skip unknown message types
+                        continue
                     
                     if role == 'assistant' and content:
-                        explanation = content
-                        break
+                        if "not available in the database" not in content:
+                            if content != user_query and content != expanded_query:
+                                if not content.startswith(user_query) and not content.startswith(expanded_query):
+                                    explanation = content
+                                    break
             
-            return SearchResponse(
-                parcels=[],
-                summary=explanation or "Please clarify vague conditions in your query.",
-                sql=None,
-                session_id=session_id
-            )
-        
-        if error:
-            return SearchResponse(
-                parcels=[],
-                summary=f"Error: {error}",
-                sql=sql_query,
-                session_id=session_id
-            )
-        
-        # Ensure results is a list, not None
-        if results is None:
-            results = []
-        
-        # Extract explanation from conversation (skip unmatched warnings)
-        explanation = ""
-        conversation = final_state.get('conversation', [])
-        if conversation:
-            for msg in reversed(conversation):
-                # Handle both dict and AIMessage objects
-                if isinstance(msg, dict):
-                    role = msg.get('role', '')
-                    content = msg.get('content', '')
-                elif hasattr(msg, 'type'):  # AIMessage or HumanMessage
-                    role = "assistant" if msg.type == "ai" else "user"
-                    content = msg.content if hasattr(msg, 'content') else str(msg)
-                elif hasattr(msg, 'content'):  # Generic message object
-                    role = "assistant"  # Default to assistant if we can't determine
-                    content = msg.content
+            # Convert all geometries to GeoJSON and transform to parcels
+            parcels = []
+            for row in results:
+                if not isinstance(row, dict):
+                    row_dict = {}
+                    for key, value in row.items():
+                        row_dict[key] = value
+                    row = row_dict
                 else:
-                    continue  # Skip unknown message types
+                    row = dict(row)
                 
-                if role == 'assistant' and content:
-                    # Skip unmatched condition warnings (they'll be added separately)
-                    # Skip messages that are just the user's query or expanded query
-                    if "not available in the database" not in content:
-                        # Skip if this looks like it's just repeating the user's query
-                        user_query = final_state.get('user_query', '')
-                        expanded_query = final_state.get('expanded_query', '')
-                        if content != user_query and content != expanded_query:
-                            # Only use explanation if it's not just the query
-                            if not content.startswith(user_query) and not content.startswith(expanded_query):
-                                explanation = content
-                                break
-        
-        # Convert all geometries to GeoJSON and transform to parcels
-        parcels = []
-        for row in results:
-            # Convert RowMapping to dict, preserving geometry object
-            if not isinstance(row, dict):
-                row_dict = {}
-                for key, value in row.items():
-                    row_dict[key] = value
-                row = row_dict
-            else:
-                row = dict(row)  # Make a copy
+                parcel = transform_row_to_parcel(row, explanation)
+                if parcel:
+                    parcels.append(parcel)
             
-            parcel = transform_row_to_parcel(row, explanation)
-            if parcel:
-                parcels.append(parcel)
-        
-        # Generate summary (don't include explanation if it's just the user's query)
-        if parcels:
-            summary = f"Found {len(parcels)} parcel{'s' if len(parcels) != 1 else ''} matching your criteria."
-            # Only add explanation if it's not just the user's query
-            if explanation and explanation != user_query and explanation != expanded_query:
-                # Also check if explanation starts with the query
-                if not explanation.startswith(user_query) and not explanation.startswith(expanded_query):
-                    summary += f" {explanation}"
-        else:
-            summary = "No parcels found matching your criteria."
-            # Only add explanation if it's not just the user's query
-            if explanation and explanation != user_query and explanation != expanded_query:
-                # Also check if explanation starts with the query
-                if not explanation.startswith(user_query) and not explanation.startswith(expanded_query):
-                    summary += f" {explanation}"
-        
-        # Include unmatched conditions warning in summary if present
-        if unmatched_warning:
-            if summary:
-                summary = f"{summary}\n\n{unmatched_warning}"
+            # Generate summary
+            if parcels:
+                summary = f"Found {len(parcels)} parcel{'s' if len(parcels) != 1 else ''} matching your criteria."
+                if explanation and explanation != user_query and explanation != expanded_query:
+                    if not explanation.startswith(user_query) and not explanation.startswith(expanded_query):
+                        summary += f" {explanation}"
             else:
-                summary = unmatched_warning
-        
-        return SearchResponse(
-            parcels=parcels,
-            summary=summary,
-            sql=sql_query,
-            session_id=session_id
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        import traceback
-        error_traceback = traceback.format_exc()
-        print(f"ERROR in search_parcels: {str(e)}")
-        print(f"Traceback: {error_traceback}")
-        raise HTTPException(status_code=500, detail=f"Error processing query: {str(e)}")
+                summary = "No parcels found matching your criteria."
+                if explanation and explanation != user_query and explanation != expanded_query:
+                    if not explanation.startswith(user_query) and not explanation.startswith(expanded_query):
+                        summary += f" {explanation}"
+            
+            # Include unmatched conditions warning
+            if unmatched_warning:
+                if summary:
+                    summary = f"{summary}\n\n{unmatched_warning}"
+                else:
+                    summary = unmatched_warning
+            
+            # Convert ParcelResponse objects to dictionaries for JSON serialization
+            parcels_dict = [parcel.model_dump() if hasattr(parcel, 'model_dump') else parcel.dict() if hasattr(parcel, 'dict') else parcel for parcel in parcels]
+            
+            # Send final result
+            yield f"data: {json.dumps({'type': 'result', 'parcels': parcels_dict, 'summary': summary, 'sql': sql_query, 'session_id': session_id})}\n\n"
+            
+        except Exception as e:
+            import traceback
+            error_traceback = traceback.format_exc()
+            print(f"ERROR in stream_search_parcels: {str(e)}")
+            print(f"Traceback: {error_traceback}")
+            yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
+    
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
+
+@api_app.post("/api/search")
+async def search_parcels(request: QueryRequest):
+    """Search for parcels using natural language query (streaming version)"""
+    print(f"Received POST request to /api/search with query: {request.query}")
+    return await stream_search_parcels(request)
 
 
 @api_app.get("/api/test")

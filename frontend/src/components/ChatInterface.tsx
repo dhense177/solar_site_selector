@@ -42,6 +42,7 @@ const ChatInterface = ({ onParcelsFound }: ChatInterfaceProps) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [currentStep, setCurrentStep] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const { toast } = useToast();
 
@@ -92,7 +93,62 @@ const ChatInterface = ({ onParcelsFound }: ChatInterfaceProps) => {
         throw new Error(errorMessage);
       }
 
-      const data = await response.json();
+      // Handle streaming response (Server-Sent Events)
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let data: any = null;
+
+      if (!reader) {
+        throw new Error('Response body is not readable');
+      }
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const jsonStr = line.slice(6);
+              const event = JSON.parse(jsonStr);
+              
+              if (event.type === 'status') {
+                // Update current step
+                setCurrentStep(event.step);
+              } else if (event.type === 'result') {
+                // Final result received
+                data = event;
+              } else if (event.type === 'error') {
+                throw new Error(event.error);
+              }
+            } catch (e) {
+              console.error('Error parsing SSE event:', e);
+            }
+          }
+        }
+      }
+
+      // Process remaining buffer
+      if (buffer.startsWith('data: ')) {
+        try {
+          const jsonStr = buffer.slice(6);
+          const event = JSON.parse(jsonStr);
+          if (event.type === 'result') {
+            data = event;
+          }
+        } catch (e) {
+          console.error('Error parsing final SSE event:', e);
+        }
+      }
+
+      if (!data) {
+        throw new Error('No data received from server');
+      }
 
       console.log('Response from API:', data);
 
@@ -164,6 +220,7 @@ const ChatInterface = ({ onParcelsFound }: ChatInterfaceProps) => {
       setMessages(prev => [...prev, assistantErrorMessage]);
     } finally {
       setIsLoading(false);
+      setCurrentStep(null);
     }
   };
 
@@ -246,7 +303,9 @@ const ChatInterface = ({ onParcelsFound }: ChatInterfaceProps) => {
           <Card className="p-4 bg-muted/50 mr-8">
             <div className="flex items-center gap-2">
               <Loader2 className="w-4 h-4 animate-spin" />
-              <p className="text-sm text-muted-foreground">Analyzing parcels...</p>
+              <p className="text-sm text-muted-foreground">
+                {currentStep || "Processing your query..."}
+              </p>
             </div>
           </Card>
         )}
