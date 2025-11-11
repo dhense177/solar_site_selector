@@ -261,18 +261,18 @@ const ChatInterface = ({ onParcelsFound }: ChatInterfaceProps) => {
       <div className="flex-1 overflow-y-auto space-y-4 p-4">
         {messages.length === 0 ? (
           <div className="space-y-4">
-            <div className="text-center pt-4 pb-8">
+            <div className="text-center pt-4 pb-4">
               <img 
                 src="/solar_panel.png" 
                 alt="Solar Panel" 
                 className="w-24 h-24 mx-auto mb-4 object-contain"
               />
-              <h3 className="text-lg font-semibold mb-2">Find Parcels For Your Solar Project</h3>
-              <p className="text-sm text-muted-foreground mb-3">
-                Use suggested prompts below or ask your own question
+              <h3 className="text-lg font-semibold mb-1">Find Parcels For Your Solar Project</h3>
+              <p className="text-sm text-muted-foreground mb-0 text-left">
+                Use suggested prompts below or ask your own question. Specify filters using precise language (i.e. "20+ acres" instead of "large parcels").
               </p>
             </div>
-            <div className="grid gap-2">
+            <div className="grid gap-2 -mt-2">
               {SUGGESTED_PROMPTS.map((prompt, index) => (
                 <Button
                   key={index}
