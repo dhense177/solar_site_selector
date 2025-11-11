@@ -320,3 +320,7 @@ if __name__ == "__main__":
 # "Find parcels with at least 50 MW of ground-mount capacity in Worcester county"
 
 # "Find me 20+ acre sites within industrial zones in Franklin County"
+
+
+# Problematic queries
+# Find me parcels that can support at least a 30MW system in Western Massachusetts
