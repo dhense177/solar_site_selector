@@ -412,13 +412,13 @@ def resolve_vague_conditions(state: SQLState):
         }
 
     # Build a confirmation message for user
-    message_lines = ["I noticed a few vague parts of your query:"]
+    message_lines = ["I noticed that your query contains some vague language:\n"]
     for cond in vague_conditions:
         message_lines.append(
-            f"- \"{cond['original']}\" → I interpreted as: {cond['suggested_replacement']}"
+            f"▪︎\"{cond['original']}\" → I interpreted as: {cond['suggested_replacement']}"
         )
     message_lines.append(
-        "\nPlease confirm if this interpretation is correct, or provide more specific criteria."
+        "\nPlease confirm if you agree with this assumption, or provide a different specification."
     )
     clarification_message = "\n".join(message_lines)
 
@@ -694,18 +694,18 @@ def display_results(state: SQLState):
                 content = msg.content
             else:
                 content = str(msg)
-            if "vague parts of your query" in content:
+            if "vague language" in content:
                 vague_message_exists = True
                 break
         if not vague_message_exists:
             # Build the message (should already be there, but just in case)
-            message_lines = ["I noticed a few vague parts of your query:"]
+            message_lines = ["I noticed that your query contains some vague language:"]
             for cond in vague_conditions:
                 message_lines.append(
-                    f"- \"{cond['original']}\" → I interpreted as: {cond['suggested_replacement']}"
+                    f"\"{cond['original']}\" → I interpreted as: {cond['suggested_replacement']}"
                 )
             message_lines.append(
-                "\nPlease confirm if this interpretation is correct, or provide more specific criteria."
+                "\nPlease confirm if you agree with this assumption, or provide a different specification."
             )
             clarification_message = "\n".join(message_lines)
             conversation.append({"role": "assistant", "content": clarification_message})
