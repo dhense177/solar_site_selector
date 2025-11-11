@@ -416,8 +416,11 @@ async def stream_search_parcels(request: QueryRequest):
             # Convert ParcelResponse objects to dictionaries for JSON serialization
             parcels_dict = [parcel.model_dump() if hasattr(parcel, 'model_dump') else parcel.dict() if hasattr(parcel, 'dict') else parcel for parcel in parcels]
             
+            # Get SQL explanation from state (generated in sql_agent.py)
+            sql_explanation = final_state.get('sql_explanation', '')
+            
             # Send final result
-            yield f"data: {json.dumps({'type': 'result', 'parcels': parcels_dict, 'summary': summary, 'sql': sql_query, 'session_id': session_id})}\n\n"
+            yield f"data: {json.dumps({'type': 'result', 'parcels': parcels_dict, 'summary': summary, 'sql': sql_query, 'sql_explanation': sql_explanation, 'session_id': session_id})}\n\n"
             
         except Exception as e:
             import traceback

@@ -2,12 +2,14 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
-import { Send, Loader2, RotateCcw } from "lucide-react";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Send, Loader2, RotateCcw, ChevronDown, ChevronUp } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 interface Message {
   role: "user" | "assistant";
   content: string;
+  sql_explanation?: string;
 }
 
 interface Parcel {
@@ -44,6 +46,7 @@ const ChatInterface = ({ onParcelsFound }: ChatInterfaceProps) => {
   const [isLoading, setIsLoading] = useState(false);
   const [currentStep, setCurrentStep] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [expandedMessages, setExpandedMessages] = useState<Set<number>>(new Set());
   const { toast } = useToast();
 
   const handleSubmit = async (queryText?: string) => {
@@ -186,13 +189,15 @@ const ChatInterface = ({ onParcelsFound }: ChatInterfaceProps) => {
         onParcelsFound(data.parcels);
         const assistantMessage: Message = {
           role: "assistant",
-          content: (data.summary || `Found ${data.parcels.length} parcels matching your criteria.`) + refinementNote
+          content: (data.summary || `Found ${data.parcels.length} parcels matching your criteria.`) + refinementNote,
+          sql_explanation: data.sql_explanation || undefined
         };
         setMessages(prev => [...prev, assistantMessage]);
       } else {
         const assistantMessage: Message = {
           role: "assistant",
-          content: (data.summary || "No parcels found matching your criteria. Try adjusting your search parameters.") + refinementNote
+          content: (data.summary || "No parcels found matching your criteria. Try adjusting your search parameters.") + refinementNote,
+          sql_explanation: data.sql_explanation || undefined
         };
         setMessages(prev => [...prev, assistantMessage]);
       }
@@ -296,6 +301,34 @@ const ChatInterface = ({ onParcelsFound }: ChatInterfaceProps) => {
               }`}
             >
               <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+              {message.role === "assistant" && message.sql_explanation && (
+                <Collapsible 
+                  open={expandedMessages.has(index)}
+                  onOpenChange={(open) => {
+                    const newExpanded = new Set(expandedMessages);
+                    if (open) {
+                      newExpanded.add(index);
+                    } else {
+                      newExpanded.delete(index);
+                    }
+                    setExpandedMessages(newExpanded);
+                  }}
+                >
+                  <CollapsibleTrigger className="flex items-center gap-2 mt-3 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
+                    {expandedMessages.has(index) ? (
+                      <ChevronUp className="w-4 h-4" />
+                    ) : (
+                      <ChevronDown className="w-4 h-4" />
+                    )}
+                    <span>Show explanation</span>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="mt-2">
+                    <div className="text-xs text-muted-foreground bg-background/50 rounded-md p-3 border border-border">
+                      <p className="whitespace-pre-wrap">{message.sql_explanation}</p>
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
+              )}
             </Card>
           ))
         )}

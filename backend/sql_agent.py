@@ -130,6 +130,9 @@ class SQLState(TypedDict):
     
     # Unmatched conditions tracking
     unmatched_conditions_warning: Optional[str]  # Warning message if conditions don't match database
+    
+    # SQL explanation
+    sql_explanation: Optional[str]  # Natural language explanation of the SQL query
 
     # Persistent multi-turn memory
     conversation: Annotated[List[Dict[str, str]], add_messages]
@@ -428,6 +431,34 @@ def resolve_vague_conditions(state: SQLState):
         ],
         "vague_conditions": vague_conditions,
     }
+
+
+def generate_sql_explanation(sql_query: str, user_query: str) -> str:
+    """Generate a natural language explanation of what the SQL query does"""
+    if not sql_query:
+        return ""
+    
+    prompt = f"""Translate the following SQL query into a clear, natural language explanation of what it does. 
+Explain it as if you're describing your thought process to a user who asked: "{user_query}"
+
+SQL Query:
+{sql_query}
+
+Provide a concise explanation (2-4 sentences) that describes:
+1. What filters/criteria were applied
+2. What tables/features were searched
+3. Any spatial relationships or distance calculations
+
+Keep it simple and avoid technical jargon. Focus on what the query is looking for, not SQL syntax.
+"""
+    
+    try:
+        response = llm.invoke(prompt)
+        explanation = response.content if hasattr(response, 'content') else str(response)
+        return explanation.strip()
+    except Exception as e:
+        print(f"Error generating SQL explanation: {e}")
+        return ""
 
 
 def generate_sql(state: SQLState):
@@ -730,6 +761,13 @@ def display_results(state: SQLState):
     # Don't add unmatched conditions warning to conversation - it will be added to summary in api_server.py
     # This prevents duplication
     
+    # Generate SQL explanation if we have results and a SQL query
+    sql_explanation = None
+    sql_query = state.get("sql_query")
+    user_query = state.get("user_query", "")
+    if results and sql_query and not error:
+        sql_explanation = generate_sql_explanation(sql_query, user_query)
+    
     if error:
         print("❌ Query failed:", error)
     elif results:
@@ -741,7 +779,10 @@ def display_results(state: SQLState):
     else:
         print("No results found.")
     
-    return {"conversation": conversation}
+    return {
+        "conversation": conversation,
+        "sql_explanation": sql_explanation
+    }
 
 
 # --- GRAPH CONSTRUCTION ---
