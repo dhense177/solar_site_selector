@@ -107,6 +107,20 @@ Each node performs specific validation and processing:
 - `geographic_features`: Land cover, land use, flood zones, open spaces, priority habitats, prime farmland
 - `infrastructure_features`: Grid infrastructure (substations, power lines), transportation infrastructure
 
+## 📊 Data Sources
+
+Yuma integrates data from multiple authoritative sources to provide comprehensive parcel analysis:
+
+- [**Parcels**](https://www.mass.gov/info-details/massgis-data-property-tax-parcels)
+- [**Administrative Boundaries**](https://www.mass.gov/info-details/massgis-data-municipalities)
+- [**Parcel Suitability**](https://technicalpotentialofsolar-ma-synapse.hub.arcgis.com/datasets/49388e675c5a493983a252d5acf64418/about)
+- [**FEMA Flood Zones**](https://www.mass.gov/info-details/massgis-data-fema-national-flood-hazard-layer)
+- [**Protected Open Space**](https://www.mass.gov/info-details/massgis-data-protected-and-recreational-openspace)
+- [**Priority Habitats**](https://www.mass.gov/info-details/massgis-data-nhesp-priority-habitats-of-rare-species)
+- [**Prime Soils**](https://gis.data.mass.gov/datasets/prime-farmland-soils-feature-service/explore)
+- [**Infrastructure**](https://docs.overturemaps.org/schema/reference/base/infrastructure/)
+- [**Land Use / Land Cover**](https://docs.overturemaps.org/schema/reference/base/land_cover/)
+
 ## 🚀 Setup
 
 ### Prerequisites
