@@ -2,7 +2,7 @@
 <div align="center">
   <img src="frontend/public/yuma.png" alt="Yuma Logo" width="200"/>
   
-  **Utility-Scale Solar Site Selection Assistant**
+  <h2>**Utility-Scale Solar Site Selection Assistant**</h2>
 </div>
 
 Yuma is an intelligent, production-grade text-to-SQL system for finding and analyzing land parcels suitable for large-scale solar development. This project combines advanced LLM orchestration, spatial data processing, and multi-turn conversation capabilities to create a sophisticated domain-specific AI assistant.
