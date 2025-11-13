@@ -1,4 +1,3 @@
-# Yuma
 
 <div align="center">
   <img src="frontend/public/yuma.png" alt="Yuma Logo" width="200"/>
