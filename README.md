@@ -389,4 +389,5 @@ solar_deep_research/
 ## 📧 Contact
 
 Email: dhense177@gmail.com
+
 Linkedin: https://www.linkedin.com/in/david-henslovitz/
